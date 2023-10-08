@@ -1,10 +1,13 @@
 use std::{borrow::Cow, path::Path};
+#![forbid(unsafe_code)]
+#![feature(box_patterns)]
 
 use lexer::Lexer;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use span::Span;
 use thiserror::Error;
 
+pub mod ast;
 pub mod lexer;
 pub mod span;
 pub mod token;
