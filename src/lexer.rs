@@ -1,13 +1,13 @@
-use std::{borrow::Cow, iter::Peekable, str::CharIndices};
+use std::{iter::Peekable, str::CharIndices};
 
 use crate::{
+    error::LexError,
     span::{BytePos, Span},
     token::{NumberKind, Token, TokenKind},
-    LoxError,
 };
 
 type Lexed<'s> = Option<Token<'s>>;
-type LexResult<'s> = std::result::Result<Lexed<'s>, LoxError<'s>>;
+type LexResult<'s> = std::result::Result<Lexed<'s>, LexError>;
 
 pub struct Lexer<'source> {
     source: &'source str,
@@ -22,10 +22,6 @@ impl<'s> Lexer<'s> {
             chars: source.char_indices().peekable(),
             pos: 0,
         }
-    }
-
-    fn error<T>(&self, message: Cow<'s, str>, span: Span) -> Result<T, LoxError<'s>> {
-        Err(LoxError::LexError { message, span })
     }
 
     #[tracing::instrument(skip(self))]
@@ -75,9 +71,8 @@ impl<'s> Lexer<'s> {
         self.eat_while(|c| c != '"');
 
         if self.eat_char('"').is_none() {
-            let message = Cow::Borrowed("unterminated string quotation");
-            let span = Span::new(from, self.source.len());
-            return self.error(message, span);
+            let span = Span::new(from, self.pos);
+            return Err(LexError::UnterminatedString(span));
         };
 
         Ok(Some(Token {
@@ -102,17 +97,13 @@ impl<'s> Lexer<'s> {
 
                 // given literal contains fractional part
                 let Ok(Some(_)) = self.eat_number() else {
-                    let message = Cow::Borrowed("fractional part is not given");
-                    let span = Span::new(pos, self.pos);
-                    return Err(LoxError::ParseNumError { message, span });
+                    return Err(LexError::InvalidNumber(Span::new(pos, self.pos)));
                 };
 
                 let span = Span::new(pos, self.pos);
-                let float = self.source[pos..self.pos].parse().map_err(|_| {
-                    let message =
-                        Cow::Owned(format!("failed to parse `{}`", &self.source[pos..self.pos]));
-                    LoxError::ParseNumError { message, span }
-                })?;
+                let float = self.source[pos..self.pos]
+                    .parse()
+                    .map_err(|_| LexError::InvalidNumber(span))?;
                 let kind = TokenKind::Number(NumberKind::Float(float));
                 Ok(Some(Token { kind, span }))
             }
@@ -122,7 +113,7 @@ impl<'s> Lexer<'s> {
     }
 
     #[tracing::instrument(skip(self))]
-    fn eat_number(&mut self) -> Result<Option<u32>, LoxError<'s>> {
+    fn eat_number(&mut self) -> Result<Option<u32>, LexError> {
         let is_integer = |c: char| c.is_ascii_digit();
         let Some(from) = self.eat_matches(is_integer) else {
             return Ok(None);
@@ -135,10 +126,7 @@ impl<'s> Lexer<'s> {
         };
 
         let span = Span::from_len(from, num_str.len());
-        let num = num_str.parse().map_err(|_| LoxError::ParseNumError {
-            message: Cow::Owned(format!("failed to parse {}", num_str)),
-            span,
-        })?;
+        let num = num_str.parse().map_err(|_| LexError::InvalidNumber(span))?;
         Ok(Some(num))
     }
 
@@ -302,7 +290,7 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    fn eat_ws(&mut self) -> Result<bool, LoxError<'s>> {
+    fn eat_ws(&mut self) -> Result<bool, LexError> {
         Ok(self.eat_matches(char::is_whitespace).is_some() || self.eat_line_comment())
     }
 
@@ -322,7 +310,7 @@ impl<'s> Lexer<'s> {
 }
 
 impl<'s> Iterator for Lexer<'s> {
-    type Item = Result<Token<'s>, LoxError<'s>>;
+    type Item = Result<Token<'s>, LexError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.lex().transpose()
@@ -334,7 +322,7 @@ mod test_lex {
     use super::*;
     use crate::token::{NumberKind, TokenKind::*};
 
-    fn lex(source: &str) -> Result<Vec<Token<'_>>, LoxError<'_>> {
+    fn lex(source: &str) -> Result<Vec<Token<'_>>, LexError> {
         Lexer::new(source).collect()
     }
 
@@ -380,7 +368,7 @@ mod test_lex {
         assert_eq!(lexed[0].span, Span::new(0, 7));
 
         // unterminated string
-        assert_lex_error!(r#""abc"#, LoxError::LexError { .. });
+        assert_lex_error!(r#""abc"#, LexError::UnterminatedString(..));
 
         // accepts multiline string
         assert_eq!(lex(r#""xxx\nxxx""#).unwrap()[0].kind, String("xxx\\nxxx"));
@@ -397,8 +385,8 @@ mod test_lex {
             Number(NumberKind::Float(123.45))
         );
         assert_eq!(lex("123.45").unwrap()[0].span, Span::new(0, 6));
-        assert_lex_error!("123.", LoxError::ParseNumError { .. });
-        assert_lex_error!("123.a", LoxError::ParseNumError { .. });
+        assert_lex_error!("123.", LexError::InvalidNumber(..));
+        assert_lex_error!("123.a", LexError::InvalidNumber(..));
     }
 
     #[test]

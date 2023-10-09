@@ -4,13 +4,18 @@
 //! CAPITALIZE -- terminal symbol; literal.
 //! x -> a ;   -- definition of x (non-terminal)
 //!
-//!
-//! expression  -> literal | unary | binary | grouping ;
 //! literal     -> NUMBER | STRING | "true" | "false" | "nil" ;
-//! grouping    -> "(" expression ")" ;
-//! unary       -> ( "-" | "!" ) expression ;
-//! binary      -> expression operator expression
 //! operator    -> "==" | "!=" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" ;
+//!
+//! ## Expressions:
+//!
+//! expression  -> equality ;
+//! equality    -> comparison ( ("!=" | "==") comparison )* ;
+//! comparison  -> term ( (">" | ">=" | "<" | "<=") term )* ;
+//! term        -> factor ( ("-" | "+") factor )* ;
+//! factor      -> unary ( ("/" | "*") unary )* ;
+//! unary       -> ( "-" | "!" ) unary | primary ;
+//! primary     -> literal | "(" expression ")" ;
 use std::fmt;
 
 use crate::span::Span;
@@ -73,11 +78,13 @@ impl fmt::Display for UnOp {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum NumberKind {
     Integer(u32),
     Float(f32),
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Literal<'s> {
     Number(NumberKind),
     String(&'s str),
