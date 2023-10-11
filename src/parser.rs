@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use crate::{
-    ast::{BinOp, Binary, Expr, Literal, NumberKind, UnOp, Unary},
+    ast::{Expr, Literal, NumberKind, Primary, UnOp, Unary, UnaryKind},
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -132,66 +132,44 @@ impl<'a> Parse<'a> for Literal<'a> {
     }
 }
 
-impl<'a> Parse<'a> for BinOp {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        use TokenKind::*;
-
-        let token = parser.peek()?;
-        let op = match token.kind {
-            EqEq => BinOp::Equal,
-            BangEq => BinOp::NotEqual,
-            Lt => BinOp::Lt,
-            LtEq => BinOp::Leq,
-            Gt => BinOp::Gt,
-            GtEq => BinOp::Geq,
-            Plus => BinOp::Plus,
-            Minus => BinOp::Minus,
-            Star => BinOp::Mul,
-            Slash => BinOp::Div,
-            _ => return parser.unexpected_token(token),
-        };
-
-        parser.next()?;
-        Ok(op)
-    }
-}
-
-impl<'a> Parse<'a> for Binary<'a> {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let lhs = parser.parse()?;
-        let op = parser.parse()?;
-        let rhs = parser.parse()?;
-
-        Ok(Binary {
-            lhs: Box::new(lhs),
-            op,
-            rhs: Box::new(rhs),
-        })
-    }
-}
-
-impl<'a> Parse<'a> for UnOp {
+impl<'a> Parse<'a> for Primary<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
-        let op = match token.kind {
-            TokenKind::Bang => UnOp::Not,
-            TokenKind::Minus => UnOp::Minus,
-            _ => return parser.unexpected_token(token),
+        let lexed = if token.kind == TokenKind::LParen {
+            let expr = parser.parse()?;
+            parser.eat(TokenKind::RParen)?;
+
+            Primary::Grouped(Box::new(expr))
+        } else {
+            let literal = parser.parse()?;
+
+            Primary::Literal(literal)
         };
 
-        parser.next()?;
-        Ok(op)
+        Ok(lexed)
     }
 }
 
 impl<'a> Parse<'a> for Unary<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let op = parser.parse()?;
-        let rhs = parser.parse()?;
-        Ok(Unary {
-            op,
-            rhs: Box::new(rhs),
-        })
+        let token = parser.peek()?;
+        let span = token.span;
+        let kind = if matches!(token.kind, TokenKind::Bang | TokenKind::Minus) {
+            let op = parser.next()?;
+            let op = match op.kind {
+                TokenKind::Bang => Some(UnOp::Not),
+                TokenKind::Minus => Some(UnOp::Minus),
+                _ => None,
+            };
+
+            let unary = Box::new(parser.parse()?);
+            UnaryKind::UnOp { op, unary }
+        } else {
+            todo!()
+        };
+
+        let span = span.with_hi(parser.tokens.current_span.hi());
+        Ok(Unary { kind, span })
     }
 }
 

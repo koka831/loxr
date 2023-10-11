@@ -54,8 +54,8 @@ pub enum UnaryKind<'s> {
 }
 
 pub struct Unary<'s> {
-    kind: UnaryKind<'s>,
-    span: Span,
+    pub kind: UnaryKind<'s>,
+    pub span: Span,
 }
 
 pub enum FactorOp {
@@ -146,13 +146,16 @@ impl<'s> fmt::Display for Literal<'s> {
 
 impl<'s> fmt::Display for Primary<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        match self {
+            Primary::Literal(ref lit) => lit.fmt(f),
+            Primary::Grouped(box expr) => expr.fmt(f),
+        }
     }
 }
 
 impl<'s> fmt::Display for Unary<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind {
+        match &self.kind {
             UnaryKind::UnOp { op, unary } => match op {
                 Some(op) => write!(f, "{}{}", op, unary),
                 None => write!(f, "{}", unary),
@@ -210,7 +213,7 @@ macro_rules! impl_display {
     ($strukt:ident) => {
         impl<'s> ::std::fmt::Display for $strukt<'s> {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                match self.rhs {
+                match &self.rhs {
                     None => write!(f, "{}", self.lhs),
                     Some((op, rhs)) => write!(f, "{} {} {}", self.lhs, op, rhs),
                 }
