@@ -71,11 +71,11 @@ pub enum TokenKind<'s> {
     /// <
     Lt,
     /// <=
-    LtEq,
+    Leq,
     /// >
     Gt,
     /// >=
-    GtEq,
+    Geq,
 }
 
 #[derive(Debug, Clone, PartialEq)]

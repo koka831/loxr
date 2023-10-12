@@ -181,7 +181,7 @@ impl<'s> Lexer<'s> {
                 self.next();
 
                 let token = match self.eat_char('=') {
-                    Some(_) => LtEq,
+                    Some(_) => Leq,
                     _ => Lt,
                 };
 
@@ -194,7 +194,7 @@ impl<'s> Lexer<'s> {
                 self.next();
 
                 let token = match self.eat_char('=') {
-                    Some(_) => GtEq,
+                    Some(_) => Geq,
                     _ => Gt,
                 };
 
@@ -357,7 +357,7 @@ mod test_lex {
         );
         assert_lex!(
             "!*+-/=<> <= ==",
-            vec![Bang, Star, Plus, Minus, Slash, Eq, Lt, Gt, LtEq, EqEq],
+            vec![Bang, Star, Plus, Minus, Slash, Eq, Lt, Gt, Leq, EqEq],
         );
     }
 

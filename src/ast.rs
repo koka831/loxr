@@ -39,12 +39,14 @@ pub enum Literal<'s> {
     Nil,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Primary<'s> {
     Literal(Literal<'s>),
     /// grouped expression "(" expr ")"
     Grouped(Box<Expr<'s>>),
 }
 
+#[derive(Debug, PartialEq)]
 pub enum UnaryKind<'s> {
     UnOp {
         op: Option<UnOp>,
@@ -53,33 +55,39 @@ pub enum UnaryKind<'s> {
     Primary(Primary<'s>),
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Unary<'s> {
     pub kind: UnaryKind<'s>,
     pub span: Span,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum FactorOp {
     Div,
     Mul,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Factor<'s> {
-    lhs: Unary<'s>,
-    rhs: Option<(FactorOp, Unary<'s>)>,
+    pub lhs: Unary<'s>,
+    pub rhs: Option<(FactorOp, Unary<'s>)>,
     pub span: Span,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum TermOp {
     Plus,
     Minus,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Term<'s> {
-    lhs: Factor<'s>,
-    rhs: Option<(TermOp, Factor<'s>)>,
+    pub lhs: Factor<'s>,
+    pub rhs: Option<(TermOp, Factor<'s>)>,
     pub span: Span,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Compare {
     Lt,
     Leq,
@@ -87,28 +95,33 @@ pub enum Compare {
     Geq,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Comparison<'s> {
-    lhs: Term<'s>,
-    rhs: Option<(Compare, Term<'s>)>,
+    pub lhs: Term<'s>,
+    pub rhs: Option<(Compare, Term<'s>)>,
     pub span: Span,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum EqOp {
     Eq,
     Neq,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Equality<'s> {
-    lhs: Comparison<'s>,
-    rhs: Option<(EqOp, Comparison<'s>)>,
+    pub lhs: Comparison<'s>,
+    pub rhs: Option<(EqOp, Comparison<'s>)>,
     pub span: Span,
 }
 
 #[non_exhaustive]
+#[derive(Debug, PartialEq)]
 pub enum ExprKind<'s> {
     Equality(Equality<'s>),
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Expr<'s> {
     pub kind: ExprKind<'s>,
     pub span: Span,

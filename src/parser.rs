@@ -1,7 +1,10 @@
 use std::iter::Peekable;
 
 use crate::{
-    ast::{Expr, Literal, NumberKind, Primary, UnOp, Unary, UnaryKind},
+    ast::{
+        Compare, Comparison, EqOp, Equality, Expr, ExprKind, Factor, FactorOp, Literal, NumberKind,
+        Primary, Term, TermOp, UnOp, Unary, UnaryKind,
+    },
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -154,6 +157,7 @@ impl<'a> Parse<'a> for Unary<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
         let span = token.span;
+        // FIXME: when op = None
         let kind = if matches!(token.kind, TokenKind::Bang | TokenKind::Minus) {
             let op = parser.next()?;
             let op = match op.kind {
@@ -165,7 +169,8 @@ impl<'a> Parse<'a> for Unary<'a> {
             let unary = Box::new(parser.parse()?);
             UnaryKind::UnOp { op, unary }
         } else {
-            todo!()
+            let primary = parser.parse()?;
+            UnaryKind::Primary(primary)
         };
 
         let span = span.with_hi(parser.tokens.current_span.hi());
@@ -173,8 +178,114 @@ impl<'a> Parse<'a> for Unary<'a> {
     }
 }
 
+impl<'a> Parse<'a> for Factor<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let lhs = parser.parse()?;
+
+        let token = parser.peek()?;
+        let span = token.span;
+        let rhs = if matches!(token.kind, TokenKind::Slash | TokenKind::Star) {
+            let op = parser.next()?;
+            let op = match op.kind {
+                TokenKind::Slash => FactorOp::Div,
+                TokenKind::Star => FactorOp::Mul,
+                _ => return parser.unexpected_token(&op),
+            };
+
+            let rhs = parser.parse()?;
+            Some((op, rhs))
+        } else {
+            None
+        };
+
+        let span = span.with_hi(parser.tokens.current_span.hi());
+        Ok(Factor { lhs, rhs, span })
+    }
+}
+
+impl<'a> Parse<'a> for Term<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let lhs = parser.parse()?;
+        let token = parser.peek()?;
+        let span = token.span;
+        let rhs = if matches!(token.kind, TokenKind::Plus | TokenKind::Minus) {
+            let op = parser.next()?;
+            let op = match op.kind {
+                TokenKind::Plus => TermOp::Plus,
+                TokenKind::Minus => TermOp::Minus,
+                _ => unreachable!(),
+            };
+
+            let rhs = parser.parse()?;
+            Some((op, rhs))
+        } else {
+            None
+        };
+
+        let span = span.with_hi(parser.tokens.current_span.hi());
+        Ok(Term { lhs, rhs, span })
+    }
+}
+
+impl<'a> Parse<'a> for Comparison<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let lhs = parser.parse()?;
+        let token = parser.peek()?;
+        let span = token.span;
+        let rhs = if matches!(
+            token.kind,
+            TokenKind::Lt | TokenKind::Leq | TokenKind::Gt | TokenKind::Geq
+        ) {
+            let op = parser.next()?;
+            let op = match op.kind {
+                TokenKind::Lt => Compare::Lt,
+                TokenKind::Leq => Compare::Leq,
+                TokenKind::Gt => Compare::Gt,
+                TokenKind::Geq => Compare::Geq,
+                _ => unreachable!(),
+            };
+            let rhs = parser.parse()?;
+            Some((op, rhs))
+        } else {
+            None
+        };
+
+        let span = span.with_hi(parser.tokens.current_span.hi());
+        Ok(Comparison { lhs, rhs, span })
+    }
+}
+
+impl<'a> Parse<'a> for Equality<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let lhs = parser.parse()?;
+        let token = parser.peek()?;
+        let span = token.span;
+        let rhs = if matches!(token.kind, TokenKind::EqEq | TokenKind::BangEq) {
+            let op = parser.next()?;
+            let op = match op.kind {
+                TokenKind::EqEq => EqOp::Eq,
+                TokenKind::BangEq => EqOp::Neq,
+                _ => unreachable!(),
+            };
+            let rhs = parser.parse()?;
+            Some((op, rhs))
+        } else {
+            None
+        };
+
+        let span = span.with_hi(parser.tokens.current_span.hi());
+        Ok(Equality { lhs, rhs, span })
+    }
+}
+
 impl<'a> Parse<'a> for Expr<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        if let equality = parser.parse::<Equality>()? {
+            let span = equality.span;
+            let kind = ExprKind::Equality(equality);
+            return Ok(Expr { kind, span });
+        }
+
         todo!()
     }
 }
@@ -207,5 +318,52 @@ mod tests {
             LoxError::UnexpectedToken { .. } => {}
             e => panic!("raises unexpected error: {e:?}"),
         }
+    }
+
+    #[test]
+    fn parse_primary() {
+        assert_parse(
+            "123",
+            Primary::Literal(Literal::Number(NumberKind::Integer(123))),
+        );
+        assert_parse(
+            "12.3",
+            Primary::Literal(Literal::Number(NumberKind::Float(12.3))),
+        );
+
+        // FIXME
+        assert_parse(
+            "(123)",
+            Primary::Literal(Literal::Number(NumberKind::Float(12.3))),
+        );
+    }
+
+    #[test]
+    fn parse_unary() {
+        assert_parse(
+            "123",
+            Unary {
+                kind: UnaryKind::Primary(Primary::Literal(Literal::Number(NumberKind::Integer(
+                    123,
+                )))),
+                span: Span::new(0, 3),
+            },
+        );
+
+        assert_parse(
+            "-123",
+            Unary {
+                kind: UnaryKind::UnOp {
+                    op: Some(UnOp::Minus),
+                    unary: Box::new(Unary {
+                        kind: UnaryKind::Primary(Primary::Literal(Literal::Number(
+                            NumberKind::Integer(123),
+                        ))),
+                        span: Span::new(1, 4),
+                    }),
+                },
+                span: Span::new(0, 4),
+            },
+        );
     }
 }
