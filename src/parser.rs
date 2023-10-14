@@ -1,10 +1,7 @@
 use std::iter::Peekable;
 
 use crate::{
-    ast::{
-        Compare, Comparison, EqOp, Equality, Expr, ExprKind, Factor, FactorOp, Literal, NumberKind,
-        Primary, Term, TermOp, UnOp, Unary, UnaryKind,
-    },
+    ast::{BinOp, Expr, ExprKind, Literal, UnOp},
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -115,14 +112,11 @@ impl<'a> Parser<'a> {
 impl<'a> Parse<'a> for Literal<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
-        let lit = match token.kind {
-            TokenKind::Number(ref kind) => {
-                let kind = match kind {
-                    token::NumberKind::Float(f) => NumberKind::Float(*f),
-                    token::NumberKind::Integer(i) => NumberKind::Integer(*i),
-                };
-                Literal::Number(kind)
-            }
+        let lit = match &token.kind {
+            TokenKind::Number(ref kind) => match kind {
+                token::NumberKind::Float(f) => Literal::Float(*f),
+                token::NumberKind::Integer(i) => Literal::Integer(*i),
+            },
             TokenKind::String(str) => Literal::String(str),
             TokenKind::True => Literal::True,
             TokenKind::False => Literal::False,
@@ -135,165 +129,87 @@ impl<'a> Parse<'a> for Literal<'a> {
     }
 }
 
-impl<'a> Parse<'a> for Primary<'a> {
+impl<'a> Parse<'a> for UnOp {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
-        let lexed = if token.kind == TokenKind::LParen {
-            let expr = parser.parse()?;
-            parser.eat(TokenKind::RParen)?;
-
-            Primary::Grouped(Box::new(expr))
-        } else {
-            let literal = parser.parse()?;
-
-            Primary::Literal(literal)
+        let op = match token.kind {
+            TokenKind::Minus => UnOp::Minus,
+            TokenKind::Bang => UnOp::Not,
+            _ => return parser.unexpected_token(token),
         };
 
-        Ok(lexed)
+        parser.next()?;
+        Ok(op)
     }
 }
 
-impl<'a> Parse<'a> for Unary<'a> {
+impl<'a> Parse<'a> for BinOp {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let token = parser.peek()?;
-        let span = token.span;
-        // FIXME: when op = None
-        let kind = if matches!(token.kind, TokenKind::Bang | TokenKind::Minus) {
-            let op = parser.next()?;
-            let op = match op.kind {
-                TokenKind::Bang => Some(UnOp::Not),
-                TokenKind::Minus => Some(UnOp::Minus),
-                _ => None,
-            };
-
-            let unary = Box::new(parser.parse()?);
-            UnaryKind::UnOp { op, unary }
-        } else {
-            let primary = parser.parse()?;
-            UnaryKind::Primary(primary)
-        };
-
-        let span = span.with_hi(parser.tokens.current_span.hi());
-        Ok(Unary { kind, span })
-    }
-}
-
-impl<'a> Parse<'a> for Factor<'a> {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let lhs = parser.parse()?;
+        use TokenKind::*;
 
         let token = parser.peek()?;
-        let span = token.span;
-        let rhs = if matches!(token.kind, TokenKind::Slash | TokenKind::Star) {
-            let op = parser.next()?;
-            let op = match op.kind {
-                TokenKind::Slash => FactorOp::Div,
-                TokenKind::Star => FactorOp::Mul,
-                _ => return parser.unexpected_token(&op),
-            };
-
-            let rhs = parser.parse()?;
-            Some((op, rhs))
-        } else {
-            None
+        let op = match token.kind {
+            BangEq => BinOp::Neq,
+            EqEq => BinOp::Eq,
+            Gt => BinOp::Gt,
+            Geq => BinOp::Geq,
+            Lt => BinOp::Lt,
+            Leq => BinOp::Leq,
+            Minus => BinOp::Minus,
+            Plus => BinOp::Plus,
+            Slash => BinOp::Div,
+            Star => BinOp::Mul,
+            _ => return parser.unexpected_token(token),
         };
 
-        let span = span.with_hi(parser.tokens.current_span.hi());
-        Ok(Factor { lhs, rhs, span })
-    }
-}
-
-impl<'a> Parse<'a> for Term<'a> {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let lhs = parser.parse()?;
-        let token = parser.peek()?;
-        let span = token.span;
-        let rhs = if matches!(token.kind, TokenKind::Plus | TokenKind::Minus) {
-            let op = parser.next()?;
-            let op = match op.kind {
-                TokenKind::Plus => TermOp::Plus,
-                TokenKind::Minus => TermOp::Minus,
-                _ => unreachable!(),
-            };
-
-            let rhs = parser.parse()?;
-            Some((op, rhs))
-        } else {
-            None
-        };
-
-        let span = span.with_hi(parser.tokens.current_span.hi());
-        Ok(Term { lhs, rhs, span })
-    }
-}
-
-impl<'a> Parse<'a> for Comparison<'a> {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let lhs = parser.parse()?;
-        let token = parser.peek()?;
-        let span = token.span;
-        let rhs = if matches!(
-            token.kind,
-            TokenKind::Lt | TokenKind::Leq | TokenKind::Gt | TokenKind::Geq
-        ) {
-            let op = parser.next()?;
-            let op = match op.kind {
-                TokenKind::Lt => Compare::Lt,
-                TokenKind::Leq => Compare::Leq,
-                TokenKind::Gt => Compare::Gt,
-                TokenKind::Geq => Compare::Geq,
-                _ => unreachable!(),
-            };
-            let rhs = parser.parse()?;
-            Some((op, rhs))
-        } else {
-            None
-        };
-
-        let span = span.with_hi(parser.tokens.current_span.hi());
-        Ok(Comparison { lhs, rhs, span })
-    }
-}
-
-impl<'a> Parse<'a> for Equality<'a> {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let lhs = parser.parse()?;
-        let token = parser.peek()?;
-        let span = token.span;
-        let rhs = if matches!(token.kind, TokenKind::EqEq | TokenKind::BangEq) {
-            let op = parser.next()?;
-            let op = match op.kind {
-                TokenKind::EqEq => EqOp::Eq,
-                TokenKind::BangEq => EqOp::Neq,
-                _ => unreachable!(),
-            };
-            let rhs = parser.parse()?;
-            Some((op, rhs))
-        } else {
-            None
-        };
-
-        let span = span.with_hi(parser.tokens.current_span.hi());
-        Ok(Equality { lhs, rhs, span })
+        parser.next()?;
+        Ok(op)
     }
 }
 
 impl<'a> Parse<'a> for Expr<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        if let equality = parser.parse::<Equality>()? {
-            let span = equality.span;
-            let kind = ExprKind::Equality(equality);
-            return Ok(Expr { kind, span });
-        }
+        let token = parser.peek()?;
+        let span = token.span;
 
-        todo!()
+        let kind = match token.kind {
+            TokenKind::Bang | TokenKind::Minus => {
+                let op = parser.parse()?;
+                let expr = parser.parse()?;
+                ExprKind::Unary(op, Box::new(expr))
+            }
+            TokenKind::LParen => {
+                parser.next()?;
+                let expr = parser.parse()?;
+                parser.eat(TokenKind::RParen)?;
+
+                ExprKind::Grouped(Box::new(expr))
+            }
+            _ => {
+                let literal = parser.parse()?;
+                ExprKind::Literal(literal)
+            }
+        };
+
+        let span = span.with_hi(parser.tokens.current_span.hi());
+        let expr = Expr { kind, span };
+
+        // If the following token is BinOp, perform parsing of rhs as `ExprKind::Binary`.
+        if let Ok(op) = parser.parse() {
+            let rhs = parser.parse()?;
+
+            let kind = ExprKind::Binary(op, Box::new(expr), Box::new(rhs));
+            let span = span.with_hi(parser.tokens.current_span.hi());
+
+            Ok(Expr { kind, span })
+        } else {
+            Ok(expr)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::NumberKind;
-
     use super::*;
     use std::fmt;
 
@@ -307,8 +223,8 @@ mod tests {
 
     #[test]
     fn parse_literal() {
-        assert_parse("12", Literal::Number(NumberKind::Integer(12)));
-        assert_parse("12.3", Literal::Number(NumberKind::Float(12.3)));
+        assert_parse("12", Literal::Integer(12));
+        assert_parse("12.3", Literal::Float(12.3));
         assert_parse(r#""string""#, Literal::String("string"));
         assert_parse("true", Literal::True);
         assert_parse("false", Literal::False);
@@ -321,48 +237,143 @@ mod tests {
     }
 
     #[test]
-    fn parse_primary() {
+    fn parse_literal_expr() {
         assert_parse(
-            "123",
-            Primary::Literal(Literal::Number(NumberKind::Integer(123))),
+            "12",
+            Expr {
+                kind: ExprKind::Literal(Literal::Integer(12)),
+                span: Span::new(0, 2),
+            },
         );
         assert_parse(
-            "12.3",
-            Primary::Literal(Literal::Number(NumberKind::Float(12.3))),
+            "true",
+            Expr {
+                kind: ExprKind::Literal(Literal::True),
+                span: Span::new(0, 4),
+            },
         );
 
-        // FIXME
-        assert_parse(
-            "(123)",
-            Primary::Literal(Literal::Number(NumberKind::Float(12.3))),
-        );
+        match Parser::new("null").parse::<Expr>().unwrap_err() {
+            LoxError::UnexpectedToken { .. } => {}
+            e => panic!("raises unexpected error: {e:?}"),
+        }
     }
 
     #[test]
-    fn parse_unary() {
+    fn parse_unary_expr() {
         assert_parse(
-            "123",
-            Unary {
-                kind: UnaryKind::Primary(Primary::Literal(Literal::Number(NumberKind::Integer(
-                    123,
-                )))),
-                span: Span::new(0, 3),
+            "!true",
+            Expr {
+                kind: ExprKind::Unary(
+                    UnOp::Not,
+                    Box::new(Expr {
+                        kind: ExprKind::Literal(Literal::True),
+                        span: Span::new(1, 5),
+                    }),
+                ),
+                span: Span::new(0, 5),
             },
         );
 
         assert_parse(
-            "-123",
-            Unary {
-                kind: UnaryKind::UnOp {
-                    op: Some(UnOp::Minus),
-                    unary: Box::new(Unary {
-                        kind: UnaryKind::Primary(Primary::Literal(Literal::Number(
-                            NumberKind::Integer(123),
-                        ))),
-                        span: Span::new(1, 4),
+            "!!true",
+            Expr {
+                kind: ExprKind::Unary(
+                    UnOp::Not,
+                    Box::new(Expr {
+                        kind: ExprKind::Unary(
+                            UnOp::Not,
+                            Box::new(Expr {
+                                kind: ExprKind::Literal(Literal::True),
+                                span: Span::new(2, 6),
+                            }),
+                        ),
+                        span: Span::new(1, 6),
                     }),
-                },
-                span: Span::new(0, 4),
+                ),
+                span: Span::new(0, 6),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_binary_expr() {
+        use super::ExprKind::*;
+        use super::Literal::*;
+        assert_parse(
+            "42 == true",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Eq,
+                    Box::new(Expr {
+                        kind: ExprKind::Literal(Integer(42)),
+                        span: Span::new(0, 2),
+                    }),
+                    Box::new(Expr {
+                        kind: ExprKind::Literal(True),
+                        span: Span::new(6, 10),
+                    }),
+                ),
+                span: Span::new(0, 10),
+            },
+        );
+
+        assert_parse(
+            "1 + 2 * 3",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Plus,
+                    Box::new(Expr {
+                        kind: ExprKind::Literal(Integer(1)),
+                        span: Span { base: 0, len: 1 },
+                    }),
+                    Box::new(Expr {
+                        kind: ExprKind::Binary(
+                            BinOp::Mul,
+                            Box::new(Expr {
+                                kind: ExprKind::Literal(Integer(2)),
+                                span: Span { base: 4, len: 1 },
+                            }),
+                            Box::new(Expr {
+                                kind: ExprKind::Literal(Integer(3)),
+                                span: Span { base: 8, len: 1 },
+                            }),
+                        ),
+                        span: Span { base: 4, len: 5 },
+                    }),
+                ),
+                span: Span { base: 0, len: 9 },
+            },
+        );
+
+        assert_parse(
+            "(1 + 2) * 3",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Mul,
+                    Box::new(Expr {
+                        kind: Grouped(Box::new(Expr {
+                            kind: Binary(
+                                BinOp::Plus,
+                                Box::new(Expr {
+                                    kind: Literal(Integer(1)),
+                                    span: Span { base: 1, len: 1 },
+                                }),
+                                Box::new(Expr {
+                                    kind: Literal(Integer(2)),
+                                    span: Span { base: 5, len: 1 },
+                                }),
+                            ),
+                            span: Span { base: 1, len: 5 },
+                        })),
+                        span: Span { base: 0, len: 6 },
+                    }),
+                    Box::new(Expr {
+                        kind: Literal(Integer(3)),
+                        span: Span { base: 10, len: 1 },
+                    }),
+                ),
+                span: Span { base: 0, len: 11 },
             },
         );
     }
