@@ -15,15 +15,15 @@ use std::fmt;
 
 use crate::span::Span;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum UnOp {
     Minus,
     Not,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Literal<'s> {
-    Integer(u32),
+    Integer(i32),
     Float(f32),
     String(&'s str),
     True,

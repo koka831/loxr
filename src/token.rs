@@ -80,6 +80,6 @@ pub enum TokenKind<'s> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NumberKind {
-    Integer(u32),
+    Integer(i32),
     Float(f32),
 }

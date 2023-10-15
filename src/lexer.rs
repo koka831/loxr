@@ -113,7 +113,7 @@ impl<'s> Lexer<'s> {
     }
 
     #[tracing::instrument(skip(self))]
-    fn eat_number(&mut self) -> Result<Option<u32>, LexError> {
+    fn eat_number(&mut self) -> Result<Option<i32>, LexError> {
         let is_integer = |c: char| c.is_ascii_digit();
         let Some(from) = self.eat_matches(is_integer) else {
             return Ok(None);

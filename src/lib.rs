@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 #![feature(box_patterns)]
+#![feature(let_chains)]
 
 use std::path::Path;
 
@@ -9,6 +10,7 @@ use rustyline::{error::ReadlineError, DefaultEditor};
 
 pub mod ast;
 pub mod error;
+pub mod interpreter;
 pub mod lexer;
 pub mod parser;
 pub mod span;
