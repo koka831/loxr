@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Literal, UnOp},
+    ast::{BinOp, Expr, ExprKind, Literal, Term, UnOp},
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -167,6 +167,27 @@ impl<'a> Parse<'a> for BinOp {
     }
 }
 
+impl<'a> Parse<'a> for Term<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let token = parser.peek()?;
+        let term = match token.kind {
+            TokenKind::LParen => {
+                parser.next()?;
+                let expr = parser.parse()?;
+                parser.eat(TokenKind::RParen)?;
+
+                Term::Grouped(Box::new(expr))
+            }
+            _ => {
+                let literal = parser.parse()?;
+                Term::Literal(literal)
+            }
+        };
+
+        Ok(term)
+    }
+}
+
 impl<'a> Parse<'a> for Expr<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
@@ -178,16 +199,9 @@ impl<'a> Parse<'a> for Expr<'a> {
                 let expr = parser.parse()?;
                 ExprKind::Unary(op, Box::new(expr))
             }
-            TokenKind::LParen => {
-                parser.next()?;
-                let expr = parser.parse()?;
-                parser.eat(TokenKind::RParen)?;
-
-                ExprKind::Grouped(Box::new(expr))
-            }
             _ => {
                 let literal = parser.parse()?;
-                ExprKind::Literal(literal)
+                ExprKind::Term(literal)
             }
         };
 
@@ -196,12 +210,35 @@ impl<'a> Parse<'a> for Expr<'a> {
 
         // If the following token is BinOp, perform parsing of rhs as `ExprKind::Binary`.
         if let Ok(op) = parser.parse() {
-            let rhs = parser.parse()?;
+            if matches!(op, BinOp::Mul | BinOp::Div) {
+                let s = parser.peek()?.span;
+                let rhs = Expr {
+                    kind: ExprKind::Term(parser.parse()?),
+                    span: s.with_hi(parser.tokens.current_span.hi()),
+                };
 
-            let kind = ExprKind::Binary(op, Box::new(expr), Box::new(rhs));
-            let span = span.with_hi(parser.tokens.current_span.hi());
+                let lhs = Expr {
+                    kind: ExprKind::Binary(op, Box::new(expr), Box::new(rhs)),
+                    span: span.with_hi(parser.tokens.current_span.hi()),
+                };
 
-            Ok(Expr { kind, span })
+                if let Ok(op) = parser.parse() {
+                    let rhs = parser.parse()?;
+
+                    Ok(Expr {
+                        kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
+                        span: span.with_hi(parser.tokens.current_span.hi()),
+                    })
+                } else {
+                    Ok(lhs)
+                }
+            } else {
+                let rhs = parser.parse()?;
+                let kind = ExprKind::Binary(op, Box::new(expr), Box::new(rhs));
+                let span = span.with_hi(parser.tokens.current_span.hi());
+
+                Ok(Expr { kind, span })
+            }
         } else {
             Ok(expr)
         }
@@ -241,14 +278,14 @@ mod tests {
         assert_parse(
             "12",
             Expr {
-                kind: ExprKind::Literal(Literal::Integer(12)),
+                kind: ExprKind::Term(Term::Literal(Literal::Integer(12))),
                 span: Span::new(0, 2),
             },
         );
         assert_parse(
             "true",
             Expr {
-                kind: ExprKind::Literal(Literal::True),
+                kind: ExprKind::Term(Term::Literal(Literal::True)),
                 span: Span::new(0, 4),
             },
         );
@@ -267,7 +304,7 @@ mod tests {
                 kind: ExprKind::Unary(
                     UnOp::Not,
                     Box::new(Expr {
-                        kind: ExprKind::Literal(Literal::True),
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
                         span: Span::new(1, 5),
                     }),
                 ),
@@ -284,7 +321,7 @@ mod tests {
                         kind: ExprKind::Unary(
                             UnOp::Not,
                             Box::new(Expr {
-                                kind: ExprKind::Literal(Literal::True),
+                                kind: ExprKind::Term(Term::Literal(Literal::True)),
                                 span: Span::new(2, 6),
                             }),
                         ),
@@ -298,19 +335,19 @@ mod tests {
 
     #[test]
     fn parse_binary_expr() {
-        use super::ExprKind::*;
         use super::Literal::*;
+
         assert_parse(
             "42 == true",
             Expr {
                 kind: ExprKind::Binary(
                     BinOp::Eq,
                     Box::new(Expr {
-                        kind: ExprKind::Literal(Integer(42)),
+                        kind: ExprKind::Term(Term::Literal(Integer(42))),
                         span: Span::new(0, 2),
                     }),
                     Box::new(Expr {
-                        kind: ExprKind::Literal(True),
+                        kind: ExprKind::Term(Term::Literal(True)),
                         span: Span::new(6, 10),
                     }),
                 ),
@@ -324,22 +361,50 @@ mod tests {
                 kind: ExprKind::Binary(
                     BinOp::Plus,
                     Box::new(Expr {
-                        kind: ExprKind::Literal(Integer(1)),
+                        kind: ExprKind::Term(Term::Literal(Integer(1))),
                         span: Span { base: 0, len: 1 },
                     }),
                     Box::new(Expr {
                         kind: ExprKind::Binary(
                             BinOp::Mul,
                             Box::new(Expr {
-                                kind: ExprKind::Literal(Integer(2)),
+                                kind: ExprKind::Term(Term::Literal(Integer(2))),
                                 span: Span { base: 4, len: 1 },
                             }),
                             Box::new(Expr {
-                                kind: ExprKind::Literal(Integer(3)),
+                                kind: ExprKind::Term(Term::Literal(Integer(3))),
                                 span: Span { base: 8, len: 1 },
                             }),
                         ),
                         span: Span { base: 4, len: 5 },
+                    }),
+                ),
+                span: Span { base: 0, len: 9 },
+            },
+        );
+
+        assert_parse(
+            "1 * 2 + 3",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Plus,
+                    Box::new(Expr {
+                        kind: ExprKind::Binary(
+                            BinOp::Mul,
+                            Box::new(Expr {
+                                kind: ExprKind::Term(Term::Literal(Integer(1))),
+                                span: Span { base: 0, len: 1 },
+                            }),
+                            Box::new(Expr {
+                                kind: ExprKind::Term(Term::Literal(Integer(2))),
+                                span: Span { base: 4, len: 1 },
+                            }),
+                        ),
+                        span: Span { base: 0, len: 5 },
+                    }),
+                    Box::new(Expr {
+                        kind: ExprKind::Term(Term::Literal(Integer(3))),
+                        span: Span { base: 8, len: 1 },
                     }),
                 ),
                 span: Span { base: 0, len: 9 },
@@ -352,24 +417,24 @@ mod tests {
                 kind: ExprKind::Binary(
                     BinOp::Mul,
                     Box::new(Expr {
-                        kind: Grouped(Box::new(Expr {
-                            kind: Binary(
+                        kind: ExprKind::Term(Term::Grouped(Box::new(Expr {
+                            kind: ExprKind::Binary(
                                 BinOp::Plus,
                                 Box::new(Expr {
-                                    kind: Literal(Integer(1)),
+                                    kind: ExprKind::Term(Term::Literal(Integer(1))),
                                     span: Span { base: 1, len: 1 },
                                 }),
                                 Box::new(Expr {
-                                    kind: Literal(Integer(2)),
+                                    kind: ExprKind::Term(Term::Literal(Integer(2))),
                                     span: Span { base: 5, len: 1 },
                                 }),
                             ),
                             span: Span { base: 1, len: 5 },
-                        })),
+                        }))),
                         span: Span { base: 0, len: 6 },
                     }),
                     Box::new(Expr {
-                        kind: Literal(Integer(3)),
+                        kind: ExprKind::Term(Term::Literal(Integer(3))),
                         span: Span { base: 10, len: 1 },
                     }),
                 ),

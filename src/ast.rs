@@ -31,6 +31,16 @@ pub enum Literal<'s> {
     Nil,
 }
 
+impl<'s> Literal<'s> {
+    pub fn from_boolean(b: bool) -> Literal<'s> {
+        if b {
+            Literal::True
+        } else {
+            Literal::False
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum BinOp {
     /// !=
@@ -55,13 +65,19 @@ pub enum BinOp {
     Mul,
 }
 
+#[derive(Debug, PartialEq)]
+/// undividable element of `Expr`
+pub enum Term<'s> {
+    Grouped(Box<Expr<'s>>),
+    Literal(Literal<'s>),
+}
+
 #[non_exhaustive]
 #[derive(Debug, PartialEq)]
 pub enum ExprKind<'s> {
     Binary(BinOp, Box<Expr<'s>>, Box<Expr<'s>>),
     Unary(UnOp, Box<Expr<'s>>),
-    Grouped(Box<Expr<'s>>),
-    Literal(Literal<'s>),
+    Term(Term<'s>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -119,6 +135,15 @@ impl<'s> fmt::Display for Literal<'s> {
     }
 }
 
+impl<'s> fmt::Display for Term<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Term::Grouped(box expr) => write!(f, "({expr})"),
+            Term::Literal(lit) => lit.fmt(f),
+        }
+    }
+}
+
 impl<'s> fmt::Display for Expr<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
@@ -128,8 +153,7 @@ impl<'s> fmt::Display for Expr<'s> {
             ExprKind::Binary(op, box lhs, box rhs) => {
                 write!(f, "{lhs} {op} {rhs}")
             }
-            ExprKind::Literal(lit) => lit.fmt(f),
-            ExprKind::Grouped(box expr) => write!(f, "({expr})"),
+            ExprKind::Term(term) => term.fmt(f),
         }
     }
 }
