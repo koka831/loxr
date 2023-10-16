@@ -107,6 +107,10 @@ impl<'a> Parser<'a> {
             self.unexpected_token(token)
         }
     }
+
+    fn current_span(&self) -> Span {
+        self.tokens.current_span
+    }
 }
 
 impl<'a> Parse<'a> for Literal<'a> {
@@ -205,21 +209,21 @@ impl<'a> Parse<'a> for Expr<'a> {
             }
         };
 
-        let span = span.with_hi(parser.tokens.current_span.hi());
+        let span = span.to(parser.current_span());
         let expr = Expr { kind, span };
 
         // If the following token is BinOp, perform parsing of rhs as `ExprKind::Binary`.
         if let Ok(op) = parser.parse() {
             if matches!(op, BinOp::Mul | BinOp::Div) {
-                let s = parser.peek()?.span;
+                let term_span = parser.peek()?.span;
                 let rhs = Expr {
                     kind: ExprKind::Term(parser.parse()?),
-                    span: s.with_hi(parser.tokens.current_span.hi()),
+                    span: term_span.to(parser.current_span()),
                 };
 
                 let lhs = Expr {
                     kind: ExprKind::Binary(op, Box::new(expr), Box::new(rhs)),
-                    span: span.with_hi(parser.tokens.current_span.hi()),
+                    span: span.to(parser.current_span()),
                 };
 
                 if let Ok(op) = parser.parse() {
@@ -227,7 +231,7 @@ impl<'a> Parse<'a> for Expr<'a> {
 
                     Ok(Expr {
                         kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
-                        span: span.with_hi(parser.tokens.current_span.hi()),
+                        span: span.to(parser.current_span()),
                     })
                 } else {
                     Ok(lhs)
@@ -235,7 +239,7 @@ impl<'a> Parse<'a> for Expr<'a> {
             } else {
                 let rhs = parser.parse()?;
                 let kind = ExprKind::Binary(op, Box::new(expr), Box::new(rhs));
-                let span = span.with_hi(parser.tokens.current_span.hi());
+                let span = span.to(parser.current_span());
 
                 Ok(Expr { kind, span })
             }

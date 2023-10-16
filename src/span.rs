@@ -20,6 +20,13 @@ impl Span {
         Span { base, len }
     }
 
+    pub fn to(&self, span: Span) -> Self {
+        let lo = self.lo().min(span.lo());
+        let hi = self.hi().max(span.hi());
+
+        Span::new(lo, hi)
+    }
+
     pub fn with_lo(&self, lo: BytePos) -> Self {
         Span::new(lo, self.hi())
     }
