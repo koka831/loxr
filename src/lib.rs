@@ -4,9 +4,11 @@
 
 use std::path::Path;
 
-use error::LexError;
+use error::LoxError;
 use lexer::Lexer;
 use rustyline::{error::ReadlineError, DefaultEditor};
+
+use crate::{ast::Expr, interpreter::Interpreter, parser::Parser};
 
 pub mod ast;
 pub mod error;
@@ -16,15 +18,16 @@ pub mod parser;
 pub mod span;
 pub mod token;
 
-pub fn prompt() -> Result<(), LexError> {
+pub fn prompt<'a>() -> Result<(), LoxError<'a>> {
     let mut rl = DefaultEditor::new().unwrap();
 
     loop {
         match rl.readline(">> ") {
             Ok(line) => {
-                let lexer = Lexer::new(&line);
-                let lexed = lexer.collect::<Result<Vec<_>, LexError>>();
-                dbg!(lexed);
+                let mut parser = Parser::new(&line);
+                let expr = parser.parse::<Expr>().unwrap();
+                let result = Interpreter::new().expr(&expr).unwrap();
+                println!("{result}");
             }
             Err(ReadlineError::Eof) => break,
             Err(e) => {
@@ -37,7 +40,7 @@ pub fn prompt() -> Result<(), LexError> {
     Ok(())
 }
 
-pub fn exec_file<'s, P: AsRef<Path> + 's>(path: P) -> Result<(), LexError> {
+pub fn exec_file<'s, P: AsRef<Path> + 's>(path: P) -> Result<(), LoxError<'s>> {
     let content = std::fs::read_to_string(path).unwrap();
 
     for lexed in Lexer::new(&content) {

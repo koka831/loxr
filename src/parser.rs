@@ -204,8 +204,8 @@ impl<'a> Parse<'a> for Expr<'a> {
                 ExprKind::Unary(op, Box::new(expr))
             }
             _ => {
-                let literal = parser.parse()?;
-                ExprKind::Term(literal)
+                let term = parser.parse()?;
+                ExprKind::Term(term)
             }
         };
 
@@ -214,6 +214,8 @@ impl<'a> Parse<'a> for Expr<'a> {
 
         // If the following token is BinOp, perform parsing of rhs as `ExprKind::Binary`.
         if let Ok(op) = parser.parse() {
+            // When encountering a high-priority operator, parse elements that do not contain the
+            // operator or are indivisible in order to construct the parse tree.
             if matches!(op, BinOp::Mul | BinOp::Div) {
                 let term_span = parser.peek()?.span;
                 let rhs = Expr {
