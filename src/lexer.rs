@@ -209,11 +209,12 @@ impl<'s> Lexer<'s> {
             }
         };
 
+        // consume peeked cursor
+        self.next();
+
         let span = Span::from_len(pos, self.pos - pos);
         let token = Token::new(token, span);
 
-        // consume peeked cursor
-        self.next();
         Ok(Some(token))
     }
 
@@ -349,6 +350,9 @@ mod test_lex {
 
     #[test]
     fn lex_symbol() {
+        let lexed = lex(";").unwrap();
+        assert_eq!(lexed[0].kind, Semicolon);
+        assert_eq!(lexed[0].span, Span::new(0, 1));
         assert_lex!("! != =", vec![Bang, BangEq, Eq]);
         assert_lex!("== = ===", vec![EqEq, Eq, EqEq, Eq]);
         assert_lex!(
@@ -402,5 +406,10 @@ mod test_lex {
                 While
             ],
         );
+    }
+
+    #[test]
+    fn lex_stmt() {
+        assert_lex!(r#"print "hi";"#, vec![Print, String("hi"), Semicolon]);
     }
 }
