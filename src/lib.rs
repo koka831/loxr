@@ -3,7 +3,7 @@
 #![feature(let_chains)]
 
 use std::{
-    io::{self, BufWriter},
+    io::{self, BufWriter, Write},
     path::Path,
 };
 
@@ -22,19 +22,24 @@ pub mod token;
 
 pub fn prompt<'a>() -> Result<(), LoxError<'a>> {
     let mut rl = DefaultEditor::new().unwrap();
-    let mut out = BufWriter::new(io::stdout().lock());
+    let mut out = BufWriter::new(io::stdout());
 
     loop {
         match rl.readline(">> ") {
             Ok(line) => {
-                let stmts = parser::parse(&line);
-                let mut interpreter = Interpreter::new(&mut out);
-                for stmt in stmts {
-                    match interpreter.stmt(&stmt) {
-                        Ok(_) => {}
-                        Err(e) => eprintln!("{e}"),
+                let stmt = match Parser::new(&line).parse() {
+                    Ok(stmt) => stmt,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        continue;
                     }
+                };
+                let mut interpreter = Interpreter::new(&mut out);
+                match interpreter.stmt(&stmt) {
+                    Ok(_) => {}
+                    Err(e) => eprintln!("{e}"),
                 }
+                out.flush().unwrap();
             }
             Err(ReadlineError::Eof) => break,
             Err(e) => {

@@ -27,7 +27,6 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
             }
             StmtKind::Print(ref expr) => {
                 let literal = self.expr(expr)?;
-                // writeln!(self.writer, "{literal}").map_err(LoxError::IoError)?;
                 writeln!(self.writer, "{literal}").unwrap();
             }
         }
