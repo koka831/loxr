@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Literal, Term, UnOp},
+    ast::{BinOp, Expr, ExprKind, Literal, Stmt, StmtKind, Term, UnOp},
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -9,6 +9,16 @@ use crate::{
 };
 
 type ParseResult<'s, T> = std::result::Result<T, LoxError<'s>>;
+
+pub fn parse(source: &str) -> Vec<Stmt<'_>> {
+    let mut parser = Parser::new(source);
+    let mut stmts = Vec::new();
+    while let Ok(stmt) = parser.parse() {
+        stmts.push(stmt);
+    }
+
+    stmts
+}
 
 pub trait Parse<'a>: Sized {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self>;
@@ -88,9 +98,13 @@ impl<'a> Parser<'a> {
 
     /// consume the next token iff token == `expected`.
     fn eat(&mut self, expected: TokenKind<'a>) -> ParseResult<'a, Token<'a>> {
-        match self.next() {
-            Ok(token) if token.kind == expected => Ok(token),
-            Ok(ref actual) => self.unexpected_token(actual),
+        let token = self.peek();
+        match token {
+            Ok(token) if token.kind == expected => {
+                let token = self.next()?;
+                Ok(token)
+            }
+            Ok(actual) => self.unexpected_token(actual),
             Err(e) => Err(e),
         }
     }
@@ -248,6 +262,29 @@ impl<'a> Parse<'a> for Expr<'a> {
         } else {
             Ok(expr)
         }
+    }
+}
+
+impl<'a> Parse<'a> for Stmt<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let span = parser.peek()?.span;
+        if parser.eat(TokenKind::Print).is_ok() {
+            let expr = parser.parse::<Expr>()?;
+            let span = span.to(expr.span);
+            return Ok(Stmt {
+                kind: StmtKind::Print(expr),
+                span,
+            });
+        }
+
+        let expr = parser.parse::<Expr>()?;
+        parser.eat(TokenKind::Semicolon)?;
+
+        let span = span.to(parser.current_span());
+        Ok(Stmt {
+            kind: StmtKind::Expr(expr),
+            span,
+        })
     }
 }
 
@@ -437,7 +474,7 @@ mod tests {
                             ),
                             span: Span { base: 1, len: 5 },
                         }))),
-                        span: Span { base: 0, len: 6 },
+                        span: Span { base: 0, len: 7 },
                     }),
                     Box::new(Expr {
                         kind: ExprKind::Term(Term::Literal(Integer(3))),
@@ -445,6 +482,40 @@ mod tests {
                     }),
                 ),
                 span: Span { base: 0, len: 11 },
+            },
+        );
+    }
+
+    #[test]
+    fn parse_stmt() {
+        assert_parse(
+            "1 + 2;",
+            Stmt {
+                kind: StmtKind::Expr(Expr {
+                    kind: ExprKind::Binary(
+                        BinOp::Plus,
+                        Box::new(Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(1))),
+                            span: Span::new(0, 1),
+                        }),
+                        Box::new(Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(2))),
+                            span: Span::new(4, 5),
+                        }),
+                    ),
+                    span: Span::new(0, 5),
+                }),
+                span: Span::new(0, 6),
+            },
+        );
+        assert_parse(
+            r#"print "hi";"#,
+            Stmt {
+                kind: StmtKind::Print(Expr {
+                    kind: ExprKind::Term(Term::Literal(Literal::String("hi"))),
+                    span: Span::new(6, 10),
+                }),
+                span: Span::new(0, 10),
             },
         );
     }

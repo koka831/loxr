@@ -1,22 +1,38 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, io};
 
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Literal, Term, UnOp},
+    ast::{BinOp, Expr, ExprKind, Literal, Stmt, StmtKind, Term, UnOp},
     error::LoxError,
     span::Span,
 };
 
-#[derive(Default)]
-pub struct Interpreter {}
+pub struct Interpreter<'s, W: io::Write> {
+    writer: &'s mut W,
+}
 
-impl Interpreter {
-    pub fn new() -> Self {
-        Interpreter {}
+impl<'s, W: io::Write> Interpreter<'s, W> {
+    pub fn new(writer: &'s mut W) -> Self {
+        Interpreter { writer }
     }
 
     fn error<'a>(&self, message: String, span: Span) -> LoxError<'a> {
         let message = Cow::Owned(message);
         LoxError::SyntaxError { message, span }
+    }
+
+    pub fn stmt<'a>(&mut self, stmt: &Stmt<'a>) -> Result<(), LoxError<'a>> {
+        match stmt.kind {
+            StmtKind::Expr(ref expr) => {
+                self.expr(expr)?;
+            }
+            StmtKind::Print(ref expr) => {
+                let literal = self.expr(expr)?;
+                // writeln!(self.writer, "{literal}").map_err(LoxError::IoError)?;
+                writeln!(self.writer, "{literal}").unwrap();
+            }
+        }
+
+        Ok(())
     }
 
     pub fn expr<'a>(&self, expr: &Expr<'a>) -> Result<Literal<'a>, LoxError<'a>> {
@@ -116,13 +132,24 @@ impl Interpreter {
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufWriter;
+
     use super::*;
     use crate::parser::Parser;
 
     fn assert_redex(program: &str, expected: Literal) {
+        let mut stdout = BufWriter::new(Vec::new());
         let expr = Parser::new(program).parse::<Expr>().unwrap();
-        let reducted = Interpreter::new().expr(&expr).unwrap();
+        let reducted = Interpreter::new(&mut stdout).expr(&expr).unwrap();
         assert_eq!(reducted, expected)
+    }
+
+    fn assert_stmt(program: &str, expected: &str) {
+        let mut stdout = BufWriter::new(Vec::new());
+        let stmt = Parser::new(program).parse::<Stmt>().unwrap();
+        Interpreter::new(&mut stdout).stmt(&stmt).unwrap();
+        let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
+        assert_eq!(output.trim(), expected.to_string());
     }
 
     #[test]
@@ -142,5 +169,13 @@ mod tests {
         assert_redex("2 * (2 + 3)", Literal::Integer(10));
         assert_redex("2 * 3 + 3 * 4", Literal::Integer(18));
         assert_redex(r#""hello, " + "world""#, Literal::String("hello, world"));
+    }
+
+    #[test]
+    fn interpret_stmt() {
+        assert_stmt("1 + 2;", "");
+        assert_stmt("print 1 + 2;", "3");
+        assert_stmt(r#"print "1 + 2";"#, "1 + 2");
+        assert_stmt(r#"print "Hello, " + "World";"#, "Hello, World");
     }
 }

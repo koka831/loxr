@@ -11,6 +11,12 @@
 //! binary      -> expr ( "!=" | "==" | ">" | ">=" | "<" | "<=" | "-" | "+" | "/" | "*") expr ;
 //! grouped     -> "(" expr ")" ;
 //! literal     -> NUMBER | STRING | "true" | "false" | "nil" ;
+//!
+//! ## Statements:
+//!
+//! program     -> statement* EOF ;
+//!
+//! statement   -> expression ";" | "print" expression ";"
 use std::fmt;
 
 use crate::span::Span;
@@ -83,6 +89,21 @@ pub enum ExprKind<'s> {
 #[derive(Debug, PartialEq)]
 pub struct Expr<'s> {
     pub kind: ExprKind<'s>,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum StmtKind<'s> {
+    /// expression ;
+    /// used for call an expression with side-effect.
+    Expr(Expr<'s>),
+    /// print expression ;
+    Print(Expr<'s>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Stmt<'s> {
+    pub kind: StmtKind<'s>,
     pub span: Span,
 }
 
