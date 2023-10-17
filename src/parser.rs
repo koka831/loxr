@@ -75,9 +75,9 @@ impl<'a> Parser<'a> {
         Parse::<'a>::parse(self)
     }
 
-    fn unexpected_token<T>(&self, token: &Token<'a>) -> ParseResult<'a, T> {
+    fn unexpected_token<T>(&self, token: &Token<'a>, message: &'a str) -> ParseResult<'a, T> {
         let token = token.clone();
-        Err(LoxError::UnexpectedToken { token })
+        Err(LoxError::UnexpectedToken { message, token })
     }
 
     fn peek(&self) -> ParseResult<'a, &Token<'a>> {
@@ -97,6 +97,7 @@ impl<'a> Parser<'a> {
     }
 
     /// consume the next token iff token == `expected`.
+    #[tracing::instrument(skip(self))]
     fn eat(&mut self, expected: TokenKind<'a>) -> ParseResult<'a, Token<'a>> {
         let token = self.peek();
         match token {
@@ -104,7 +105,7 @@ impl<'a> Parser<'a> {
                 let token = self.next()?;
                 Ok(token)
             }
-            Ok(actual) => self.unexpected_token(actual),
+            Ok(actual) => self.unexpected_token(actual, "expect matching tokenkind"),
             Err(e) => Err(e),
         }
     }
@@ -118,7 +119,7 @@ impl<'a> Parser<'a> {
             let token = self.next()?;
             Ok(token)
         } else {
-            self.unexpected_token(token)
+            self.unexpected_token(token, "expect matching to the matcher")
         }
     }
 
@@ -139,7 +140,7 @@ impl<'a> Parse<'a> for Literal<'a> {
             TokenKind::True => Literal::True,
             TokenKind::False => Literal::False,
             TokenKind::Nil => Literal::Nil,
-            _ => return parser.unexpected_token(token),
+            _ => return parser.unexpected_token(token, "expect a literal"),
         };
 
         parser.next()?;
@@ -153,7 +154,7 @@ impl<'a> Parse<'a> for UnOp {
         let op = match token.kind {
             TokenKind::Minus => UnOp::Minus,
             TokenKind::Bang => UnOp::Not,
-            _ => return parser.unexpected_token(token),
+            _ => return parser.unexpected_token(token, "expect unary operator"),
         };
 
         parser.next()?;
@@ -177,7 +178,7 @@ impl<'a> Parse<'a> for BinOp {
             Plus => BinOp::Plus,
             Slash => BinOp::Div,
             Star => BinOp::Mul,
-            _ => return parser.unexpected_token(token),
+            _ => return parser.unexpected_token(token, "expect binary operator"),
         };
 
         parser.next()?;
@@ -270,7 +271,9 @@ impl<'a> Parse<'a> for Stmt<'a> {
         let span = parser.peek()?.span;
         if parser.eat(TokenKind::Print).is_ok() {
             let expr = parser.parse::<Expr>()?;
-            let span = span.to(expr.span);
+            parser.eat(TokenKind::Semicolon)?;
+            let span = span.to(parser.current_span());
+
             return Ok(Stmt {
                 kind: StmtKind::Print(expr),
                 span,
@@ -515,7 +518,7 @@ mod tests {
                     kind: ExprKind::Term(Term::Literal(Literal::String("hi"))),
                     span: Span::new(6, 10),
                 }),
-                span: Span::new(0, 10),
+                span: Span::new(0, 11),
             },
         );
     }

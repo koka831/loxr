@@ -11,8 +11,8 @@ pub enum LoxError<'a> {
     #[error("unexpected end of file")]
     UnexpectedEOF,
 
-    #[error("unexpected token: {token:?}")]
-    UnexpectedToken { token: Token<'a> },
+    #[error("unexpected token: {message}, actual: {token}")]
+    UnexpectedToken { message: &'a str, token: Token<'a>, },
 
     #[error("syntax error at {span:?}: {message}")]
     SyntaxError { message: Cow<'a, str>, span: Span },
