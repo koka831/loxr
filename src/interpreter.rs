@@ -60,7 +60,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 let literal = self.expr(expr)?;
                 writeln!(self.writer, "{literal}").unwrap();
             }
-            StmtKind::Local { name, initializer } => self.env.define(name, initializer),
+            StmtKind::Assign { name, initializer } => self.env.define(name, initializer),
         }
 
         self.writer.flush().unwrap();

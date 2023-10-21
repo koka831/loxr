@@ -16,7 +16,9 @@
 //!
 //! program     -> statement* EOF ;
 //!
-//! statement   -> expression ";" | "print" expression ";"
+//! statement   -> expression ";"
+//!             | "print" expression ";"
+//!             | ( "var" )? ident "=" expression ";"
 use std::fmt;
 
 use crate::span::Span;
@@ -114,7 +116,7 @@ pub enum StmtKind<'s> {
     Print(Expr<'s>),
     /// variable declaration
     /// var ident ( = expr )? ;
-    Local {
+    Assign {
         name: Ident<'s>,
         initializer: Expr<'s>,
     },

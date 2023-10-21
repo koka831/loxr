@@ -297,7 +297,15 @@ impl<'a> Parse<'a> for Stmt<'a> {
                     Expr::nil()
                 };
 
-                StmtKind::Local { name, initializer }
+                StmtKind::Assign { name, initializer }
+            }
+            // ident = expr ; (re-assignment)
+            TokenKind::Ident(_) => {
+                let name = parser.parse()?;
+                parser.eat(TokenKind::Eq)?;
+                let initializer = parser.parse()?;
+
+                StmtKind::Assign { name, initializer }
             }
             _ => {
                 let expr = parser.parse::<Expr>()?;
@@ -322,7 +330,7 @@ mod tests {
     where
         P: Parse<'a> + PartialEq + fmt::Debug,
     {
-        let parsed = Parser::new(source.into()).parse::<P>().unwrap();
+        let parsed = Parser::new(source).parse::<P>().unwrap();
         assert_eq!(parsed, expect);
     }
 
@@ -335,7 +343,7 @@ mod tests {
         assert_parse("false", Literal::False);
         assert_parse("nil", Literal::Nil);
 
-        match Parser::new("null".into()).parse::<Literal>().unwrap_err() {
+        match Parser::new("null").parse::<Literal>().unwrap_err() {
             LoxError::UnexpectedToken { .. } => {}
             e => panic!("raises unexpected error: {e:?}"),
         }
@@ -358,7 +366,7 @@ mod tests {
             },
         );
 
-        match Parser::new("null".into()).parse::<Expr>().unwrap_err() {
+        match Parser::new("null").parse::<Expr>().unwrap_err() {
             LoxError::UnexpectedToken { .. } => {}
             e => panic!("raises unexpected error: {e:?}"),
         }
@@ -550,8 +558,8 @@ mod tests {
         assert_parse(
             "var x1_foobar;",
             Stmt {
-                kind: StmtKind::Local {
-                    name: Ident("x1_foobar".into()),
+                kind: StmtKind::Assign {
+                    name: Ident("x1_foobar"),
                     initializer: Expr::nil(),
                 },
                 span: Span::new(0, 14),
@@ -560,8 +568,8 @@ mod tests {
         assert_parse(
             "var x = 10;",
             Stmt {
-                kind: StmtKind::Local {
-                    name: Ident("x".into()),
+                kind: StmtKind::Assign {
+                    name: Ident("x"),
                     initializer: Expr {
                         kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
                         span: Span::new(8, 10),
@@ -569,6 +577,19 @@ mod tests {
                 },
                 span: Span::new(0, 11),
             },
-        )
+        );
+        assert_parse(
+            "x = 10;",
+            Stmt {
+                kind: StmtKind::Assign {
+                    name: Ident("x"),
+                    initializer: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                        span: Span::new(4, 6),
+                    },
+                },
+                span: Span::new(0, 7),
+            },
+        );
     }
 }
