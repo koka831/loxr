@@ -1,9 +1,7 @@
 use std::env;
 
-use loxr::{exec_file, prompt};
-use tracing_subscriber::fmt;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
+use loxr::exec_file;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 fn main() {
     let filter_layer = EnvFilter::try_from_default_env()
@@ -18,7 +16,7 @@ fn main() {
     let res = if let Some(fpath) = args.get(1) {
         exec_file(fpath)
     } else {
-        prompt()
+        todo!("support REPL")
     };
 
     if let Err(e) = res {

@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Literal, Stmt, StmtKind, Term, UnOp},
+    ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp},
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -148,6 +148,16 @@ impl<'a> Parse<'a> for Literal<'a> {
     }
 }
 
+impl<'a> Parse<'a> for Ident<'a> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+        let token = parser.next()?;
+        match token.kind {
+            TokenKind::Ident(name) => Ok(Ident(name)),
+            _ => parser.unexpected_token(&token, "expect an identifier"),
+        }
+    }
+}
+
 impl<'a> Parse<'a> for UnOp {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
@@ -268,26 +278,38 @@ impl<'a> Parse<'a> for Expr<'a> {
 
 impl<'a> Parse<'a> for Stmt<'a> {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
-        let span = parser.peek()?.span;
-        if parser.eat(TokenKind::Print).is_ok() {
-            let expr = parser.parse::<Expr>()?;
-            parser.eat(TokenKind::Semicolon)?;
-            let span = span.to(parser.current_span());
+        let token = parser.peek()?;
+        let span = token.span;
 
-            return Ok(Stmt {
-                kind: StmtKind::Print(expr),
-                span,
-            });
-        }
+        let kind = match token.kind {
+            TokenKind::Print => {
+                parser.eat(TokenKind::Print)?;
+                let expr = parser.parse::<Expr>()?;
 
-        let expr = parser.parse::<Expr>()?;
+                StmtKind::Print(expr)
+            }
+            TokenKind::Var => {
+                parser.eat(TokenKind::Var)?;
+                let name = parser.parse()?;
+                let initializer = if parser.eat(TokenKind::Eq).is_ok() {
+                    parser.parse()?
+                } else {
+                    Expr::nil()
+                };
+
+                StmtKind::Local { name, initializer }
+            }
+            _ => {
+                let expr = parser.parse::<Expr>()?;
+
+                StmtKind::Expr(expr)
+            }
+        };
+
         parser.eat(TokenKind::Semicolon)?;
-
         let span = span.to(parser.current_span());
-        Ok(Stmt {
-            kind: StmtKind::Expr(expr),
-            span,
-        })
+
+        Ok(Stmt { kind, span })
     }
 }
 
@@ -300,7 +322,7 @@ mod tests {
     where
         P: Parse<'a> + PartialEq + fmt::Debug,
     {
-        let parsed = Parser::new(source).parse::<P>().unwrap();
+        let parsed = Parser::new(source.into()).parse::<P>().unwrap();
         assert_eq!(parsed, expect);
     }
 
@@ -313,7 +335,7 @@ mod tests {
         assert_parse("false", Literal::False);
         assert_parse("nil", Literal::Nil);
 
-        match Parser::new("null").parse::<Literal>().unwrap_err() {
+        match Parser::new("null".into()).parse::<Literal>().unwrap_err() {
             LoxError::UnexpectedToken { .. } => {}
             e => panic!("raises unexpected error: {e:?}"),
         }
@@ -336,7 +358,7 @@ mod tests {
             },
         );
 
-        match Parser::new("null").parse::<Expr>().unwrap_err() {
+        match Parser::new("null".into()).parse::<Expr>().unwrap_err() {
             LoxError::UnexpectedToken { .. } => {}
             e => panic!("raises unexpected error: {e:?}"),
         }
@@ -521,5 +543,32 @@ mod tests {
                 span: Span::new(0, 11),
             },
         );
+    }
+
+    #[test]
+    fn parse_variable_decl() {
+        assert_parse(
+            "var x1_foobar;",
+            Stmt {
+                kind: StmtKind::Local {
+                    name: Ident("x1_foobar".into()),
+                    initializer: Expr::nil(),
+                },
+                span: Span::new(0, 14),
+            },
+        );
+        assert_parse(
+            "var x = 10;",
+            Stmt {
+                kind: StmtKind::Local {
+                    name: Ident("x".into()),
+                    initializer: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                        span: Span::new(8, 10),
+                    },
+                },
+                span: Span::new(0, 11),
+            },
+        )
     }
 }

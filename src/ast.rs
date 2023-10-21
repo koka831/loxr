@@ -76,6 +76,7 @@ pub enum BinOp {
 pub enum Term<'s> {
     Grouped(Box<Expr<'s>>),
     Literal(Literal<'s>),
+    Ident(Ident<'s>),
 }
 
 #[non_exhaustive]
@@ -92,6 +93,18 @@ pub struct Expr<'s> {
     pub span: Span,
 }
 
+impl<'s> Expr<'s> {
+    pub fn nil() -> Self {
+        Expr {
+            kind: ExprKind::Term(Term::Literal(Literal::Nil)),
+            span: Span::new(0, 0),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct Ident<'s>(pub &'s str);
+
 #[derive(Debug, PartialEq)]
 pub enum StmtKind<'s> {
     /// expression ;
@@ -99,6 +112,12 @@ pub enum StmtKind<'s> {
     Expr(Expr<'s>),
     /// print expression ;
     Print(Expr<'s>),
+    /// variable declaration
+    /// var ident ( = expr )? ;
+    Local {
+        name: Ident<'s>,
+        initializer: Expr<'s>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -156,11 +175,18 @@ impl<'s> fmt::Display for Literal<'s> {
     }
 }
 
+impl<'s> fmt::Display for Ident<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl<'s> fmt::Display for Term<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Term::Grouped(box expr) => write!(f, "({expr})"),
             Term::Literal(lit) => lit.fmt(f),
+            Term::Ident(ident) => ident.fmt(f),
         }
     }
 }

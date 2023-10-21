@@ -1,26 +1,57 @@
 use std::{borrow::Cow, io};
 
+use rustc_hash::FxHashMap;
+
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Literal, Stmt, StmtKind, Term, UnOp},
+    ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp},
     error::LoxError,
+    parser::Parser,
     span::Span,
 };
 
-pub struct Interpreter<'s, W: io::Write> {
-    writer: &'s mut W,
+#[derive(Default)]
+pub struct Environment<'scope> {
+    env: FxHashMap<Ident<'scope>, Expr<'scope>>,
 }
 
-impl<'s, W: io::Write> Interpreter<'s, W> {
-    pub fn new(writer: &'s mut W) -> Self {
-        Interpreter { writer }
+impl<'s> Environment<'s> {
+    pub fn new() -> Self {
+        let env = FxHashMap::default();
+        Environment { env }
     }
 
-    fn error<'a>(&self, message: String, span: Span) -> LoxError<'a> {
+    #[tracing::instrument(skip(self))]
+    pub fn define(&mut self, ident: Ident<'s>, expr: Expr<'s>) {
+        self.env.insert(ident, expr);
+    }
+
+    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Expr<'s>> {
+        self.env.get(ident)
+    }
+}
+
+pub struct Interpreter<'a, 's: 'a, W: io::Write> {
+    writer: &'s mut W,
+    env: Environment<'a>,
+}
+
+impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
+    pub fn new(writer: &'s mut W) -> Self {
+        let env = Environment::new();
+        Interpreter { writer, env }
+    }
+
+    fn error(&self, message: String, span: Span) -> LoxError<'a> {
         let message = Cow::Owned(message);
         LoxError::SyntaxError { message, span }
     }
 
-    pub fn stmt<'a>(&mut self, stmt: &Stmt<'a>) -> Result<(), LoxError<'a>> {
+    pub fn execute(&mut self, line: &'a str) -> Result<(), LoxError<'a>> {
+        let stmt = Parser::new(line).parse()?;
+        self.stmt(stmt)
+    }
+
+    fn stmt(&mut self, stmt: Stmt<'a>) -> Result<(), LoxError<'a>> {
         match stmt.kind {
             StmtKind::Expr(ref expr) => {
                 self.expr(expr)?;
@@ -29,12 +60,15 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 let literal = self.expr(expr)?;
                 writeln!(self.writer, "{literal}").unwrap();
             }
+            StmtKind::Local { name, initializer } => self.env.define(name, initializer),
         }
+
+        self.writer.flush().unwrap();
 
         Ok(())
     }
 
-    pub fn expr<'a>(&self, expr: &Expr<'a>) -> Result<Literal<'a>, LoxError<'a>> {
+    fn expr(&self, expr: &Expr<'a>) -> Result<Literal<'a>, LoxError<'a>> {
         match &expr.kind {
             ExprKind::Term(term) => Ok(self.term(term)?),
             ExprKind::Unary(op, expr) => match expr.kind {
@@ -111,14 +145,24 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
         }
     }
 
-    fn term<'a>(&self, term: &Term<'a>) -> Result<Literal<'a>, LoxError<'a>> {
+    fn term(&self, term: &Term<'a>) -> Result<Literal<'a>, LoxError<'a>> {
         match &term {
             Term::Literal(lit) => Ok(*lit),
             Term::Grouped(box expr) => Ok(self.expr(expr)?),
+            Term::Ident(ident) => {
+                let Some(value) = self.env.lookup(ident) else {
+                    // TODO: give a span
+                    return Err(
+                        self.error(format!("undefined identifier `{ident}`"), Span::new(0, 0))
+                    );
+                };
+
+                Ok(self.expr(value)?)
+            }
         }
     }
 
-    fn apply_unary<'a>(&self, op: UnOp, lit: Literal<'a>) -> Result<Literal<'a>, String> {
+    fn apply_unary(&self, op: UnOp, lit: Literal<'a>) -> Result<Literal<'a>, String> {
         match lit {
             Literal::True if op == UnOp::Not => Ok(Literal::False),
             Literal::False if op == UnOp::Not => Ok(Literal::True),
@@ -146,7 +190,7 @@ mod tests {
     fn assert_stmt(program: &str, expected: &str) {
         let mut stdout = BufWriter::new(Vec::new());
         let stmt = Parser::new(program).parse::<Stmt>().unwrap();
-        Interpreter::new(&mut stdout).stmt(&stmt).unwrap();
+        Interpreter::new(&mut stdout).stmt(stmt).unwrap();
         let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
         assert_eq!(output.trim(), expected.to_string());
     }
