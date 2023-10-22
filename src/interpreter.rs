@@ -61,6 +61,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 writeln!(self.writer, "{literal}").unwrap();
             }
             StmtKind::Assign { name, initializer } => self.env.define(name, initializer),
+            _ => unimplemented!()
         }
 
         self.writer.flush().unwrap();

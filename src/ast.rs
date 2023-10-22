@@ -16,9 +16,10 @@
 //!
 //! program     -> statement* EOF ;
 //!
-//! statement   -> expression ";"
-//!             | "print" expression ";"
-//!             | ( "var" )? ident "=" expression ";"
+//! statement   -> expression ";" ;
+//!             | "print" expression ";" ;
+//!             | ( "var" )? ident "=" expression ";" ;
+//!             | "{" statement* "}" ;
 use std::fmt;
 
 use crate::span::Span;
@@ -120,6 +121,7 @@ pub enum StmtKind<'s> {
         name: Ident<'s>,
         initializer: Expr<'s>,
     },
+    Block(Vec<Stmt<'s>>),
 }
 
 #[derive(Debug, PartialEq)]
