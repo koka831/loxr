@@ -207,6 +207,7 @@ impl<'a> Parse<'a> for Term<'a> {
 
                 Term::Grouped(Box::new(expr))
             }
+            TokenKind::Ident(_) => Term::Ident(parser.parse()?),
             _ => {
                 let literal = parser.parse()?;
                 Term::Literal(literal)
@@ -307,6 +308,22 @@ impl<'a> Parse<'a> for Stmt<'a> {
 
                 StmtKind::Assign { name, initializer }
             }
+            TokenKind::LBrace => {
+                parser.eat(TokenKind::LBrace)?;
+                let mut stmts = Vec::new();
+
+                while parser.peek()?.kind != TokenKind::RBrace {
+                    let stmt = parser.parse()?;
+                    stmts.push(stmt);
+                }
+
+                parser.eat(TokenKind::RBrace)?;
+
+                // block does not end with `;`
+                let span = span.to(parser.current_span());
+                let kind = StmtKind::Block(stmts);
+                return Ok(Stmt { kind, span });
+            }
             _ => {
                 let expr = parser.parse::<Expr>()?;
 
@@ -365,11 +382,6 @@ mod tests {
                 span: Span::new(0, 4),
             },
         );
-
-        match Parser::new("null").parse::<Expr>().unwrap_err() {
-            LoxError::UnexpectedToken { .. } => {}
-            e => panic!("raises unexpected error: {e:?}"),
-        }
     }
 
     #[test]
@@ -551,6 +563,16 @@ mod tests {
                 span: Span::new(0, 11),
             },
         );
+        assert_parse(
+            "print x;",
+            Stmt {
+                kind: StmtKind::Print(Expr {
+                    kind: ExprKind::Term(Term::Ident(Ident("x"))),
+                    span: Span::new(6, 7),
+                }),
+                span: Span::new(0, 8),
+            },
+        );
     }
 
     #[test]
@@ -589,6 +611,58 @@ mod tests {
                     },
                 },
                 span: Span::new(0, 7),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_block() {
+        assert_parse(
+            "{}",
+            Stmt {
+                kind: StmtKind::Block(vec![]),
+                span: Span::new(0, 2),
+            },
+        );
+        assert_parse(
+            "{ var x = 10; }",
+            Stmt {
+                kind: StmtKind::Block(vec![Stmt {
+                    kind: StmtKind::Assign {
+                        name: Ident("x"),
+                        initializer: Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                            span: Span::new(10, 12),
+                        },
+                    },
+                    span: Span::new(2, 13),
+                }]),
+                span: Span::new(0, 15),
+            },
+        );
+        assert_parse(
+            "{ var x = 10; print x; }",
+            Stmt {
+                kind: StmtKind::Block(vec![
+                    Stmt {
+                        kind: StmtKind::Assign {
+                            name: Ident("x"),
+                            initializer: Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                                span: Span::new(10, 12),
+                            },
+                        },
+                        span: Span::new(2, 13),
+                    },
+                    Stmt {
+                        kind: StmtKind::Print(Expr {
+                            kind: ExprKind::Term(Term::Ident(Ident("x"))),
+                            span: Span::new(20, 21),
+                        }),
+                        span: Span::new(14, 22),
+                    },
+                ]),
+                span: Span::new(0, 24),
             },
         );
     }

@@ -48,7 +48,11 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
 
     pub fn execute(&mut self, line: &'a str) -> Result<(), LoxError<'a>> {
         let stmt = Parser::new(line).parse()?;
-        self.stmt(stmt)
+        self.stmt(stmt)?;
+
+        self.writer.flush().unwrap();
+
+        Ok(())
     }
 
     fn stmt(&mut self, stmt: Stmt<'a>) -> Result<(), LoxError<'a>> {
@@ -61,10 +65,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 writeln!(self.writer, "{literal}").unwrap();
             }
             StmtKind::Assign { name, initializer } => self.env.define(name, initializer),
-            _ => unimplemented!()
+            StmtKind::Block(stmts) => {
+                for stmt in stmts {
+                    self.stmt(stmt)?;
+                }
+            }
         }
-
-        self.writer.flush().unwrap();
 
         Ok(())
     }
