@@ -125,6 +125,24 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 }
                 self.env.exit_scope()?;
             }
+            StmtKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => match self.expr(&condition)? {
+                boolean @ (Literal::True | Literal::False) => {
+                    if boolean == Literal::True {
+                        self.stmt(*then_branch)?;
+                    } else if let Some(else_branch) = else_branch {
+                        self.stmt(*else_branch)?;
+                    }
+                }
+                _ => {
+                    let message =
+                        String::from("condition of if statement is not evaluated to boolean");
+                    return Err(self.error(message, stmt.span));
+                }
+            },
         }
 
         Ok(())
@@ -304,5 +322,11 @@ mod tests {
         "#,
             "20\n30\n20\n10",
         );
+    }
+
+    #[test]
+    fn interpret_if_stmt() {
+        assert_stmt(r#"if(true) { print 10; } else { print 0; }"#, "10");
+        assert_stmt(r#"if(false) { print 10; } else { print 0; }"#, "0");
     }
 }

@@ -110,19 +110,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn eat_matches<F>(&mut self, matcher: F) -> ParseResult<'a, Token<'a>>
-    where
-        F: Fn(&Token<'a>) -> bool,
-    {
-        let token = self.peek()?;
-        if matcher(token) {
-            let token = self.next()?;
-            Ok(token)
-        } else {
-            self.unexpected_token(token, "expect matching to the matcher")
-        }
-    }
-
     fn current_span(&self) -> Span {
         self.tokens.current_span
     }
@@ -323,6 +310,29 @@ impl<'a> Parse<'a> for Stmt<'a> {
                 let span = span.to(parser.current_span());
                 let kind = StmtKind::Block(stmts);
                 return Ok(Stmt { kind, span });
+            }
+            TokenKind::If => {
+                parser.eat(TokenKind::If)?;
+                parser.eat(TokenKind::LParen)?;
+                let condition = parser.parse()?;
+                parser.eat(TokenKind::RParen)?;
+
+                let then_branch = Box::new(parser.parse()?);
+                let else_branch = if parser.eat(TokenKind::Else).is_ok() {
+                    Some(Box::new(parser.parse()?))
+                } else {
+                    None
+                };
+                let span = span.to(parser.current_span());
+
+                return Ok(Stmt {
+                    kind: StmtKind::If {
+                        condition,
+                        then_branch,
+                        else_branch,
+                    },
+                    span,
+                });
             }
             _ => {
                 let expr = parser.parse::<Expr>()?;
@@ -663,6 +673,76 @@ mod tests {
                     },
                 ]),
                 span: Span::new(0, 24),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_if_stmt() {
+        assert_parse(
+            "if(true) print 10;",
+            Stmt {
+                kind: StmtKind::If {
+                    condition: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span::new(3, 7),
+                    },
+                    then_branch: Box::new(Stmt {
+                        kind: StmtKind::Print(Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                            span: Span::new(15, 17),
+                        }),
+                        span: Span::new(9, 18),
+                    }),
+                    else_branch: None,
+                },
+                span: Span::new(0, 18),
+            },
+        );
+        assert_parse(
+            "if(10 != 42) {
+                print false;
+            } else {
+                print true;
+            }",
+            Stmt {
+                kind: StmtKind::If {
+                    condition: Expr {
+                        kind: ExprKind::Binary(
+                            BinOp::Neq,
+                            Box::new(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                                span: Span { base: 3, len: 2 },
+                            }),
+                            Box::new(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::Integer(42))),
+                                span: Span { base: 9, len: 2 },
+                            }),
+                        ),
+                        span: Span { base: 3, len: 8 },
+                    },
+                    then_branch: Box::new(Stmt {
+                        kind: StmtKind::Block(vec![Stmt {
+                            kind: StmtKind::Print(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::False)),
+                                span: Span { base: 37, len: 5 },
+                            }),
+                            span: Span { base: 31, len: 12 },
+                        }]),
+                        span: Span { base: 13, len: 44 },
+                    }),
+                    else_branch: Some(Box::new(Stmt {
+                        kind: StmtKind::Block(vec![Stmt {
+                            kind: StmtKind::Print(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::True)),
+                                span: Span { base: 87, len: 4 },
+                            }),
+                            span: Span { base: 81, len: 11 },
+                        }]),
+                        span: Span { base: 63, len: 43 },
+                    })),
+                },
+                span: Span { base: 0, len: 106 },
             },
         );
     }

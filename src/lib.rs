@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 #![feature(box_patterns)]
 #![feature(let_chains)]
-#![feature(string_leak)]
 
 use std::{
     io::{self, BufWriter},

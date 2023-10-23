@@ -20,6 +20,7 @@
 //!             | "print" expression ";" ;
 //!             | ( "var" )? ident "=" expression ";" ;
 //!             | "{" statement* "}" ;
+//!             | "if" "(" ")" statement ( "else" statement )? ;
 use std::fmt;
 
 use crate::span::Span;
@@ -127,6 +128,12 @@ pub enum StmtKind<'s> {
         expr: Expr<'s>,
     },
     Block(Vec<Stmt<'s>>),
+    /// if ( expr ) statement ( else statement )?
+    If {
+        condition: Expr<'s>,
+        then_branch: Box<Stmt<'s>>,
+        else_branch: Option<Box<Stmt<'s>>>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
