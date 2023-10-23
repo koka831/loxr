@@ -117,9 +117,14 @@ pub enum StmtKind<'s> {
     Print(Expr<'s>),
     /// variable declaration
     /// var ident ( = expr )? ;
-    Assign {
+    DeclVar {
         name: Ident<'s>,
         initializer: Expr<'s>,
+    },
+    // assign a value to a defined variable.
+    Assign {
+        name: Ident<'s>,
+        expr: Expr<'s>,
     },
     Block(Vec<Stmt<'s>>),
 }

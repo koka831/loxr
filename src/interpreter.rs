@@ -5,28 +5,70 @@ use rustc_hash::FxHashMap;
 use crate::{
     ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp},
     error::LoxError,
-    parser::Parser,
+    parser,
     span::Span,
 };
 
 #[derive(Default)]
 pub struct Environment<'scope> {
+    table: SymbolTable<'scope>,
+}
+
+#[derive(Default)]
+pub struct SymbolTable<'scope> {
     env: FxHashMap<Ident<'scope>, Expr<'scope>>,
+    enclosing: Option<Box<SymbolTable<'scope>>>,
 }
 
 impl<'s> Environment<'s> {
     pub fn new() -> Self {
-        let env = FxHashMap::default();
-        Environment { env }
+        let table = SymbolTable::new();
+        Environment { table }
     }
 
-    #[tracing::instrument(skip(self))]
+    // #[tracing::instrument(skip(self))]
     pub fn define(&mut self, ident: Ident<'s>, expr: Expr<'s>) {
+        tracing::info!("define {ident} = {expr}");
+        self.table.define(ident, expr);
+    }
+
+    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Expr<'s>> {
+        self.table.lookup(ident)
+    }
+
+    /// creates a nested/scoped environment that is used while executing a block statement.
+    pub fn nest_scope<'a>(&mut self) -> Result<(), LoxError<'a>> {
+        let current_table = std::mem::take(&mut self.table);
+        self.table = SymbolTable {
+            enclosing: Some(Box::new(current_table)),
+            ..Default::default()
+        };
+        Ok(())
+    }
+
+    pub fn exit_scope<'a>(&mut self) -> Result<(), LoxError<'a>> {
+        assert!(self.table.enclosing.is_some());
+        self.table = *self.table.enclosing.take().unwrap();
+        Ok(())
+    }
+}
+
+impl<'s> SymbolTable<'s> {
+    pub fn new() -> Self {
+        let env = FxHashMap::default();
+        let enclosing = None;
+        SymbolTable { env, enclosing }
+    }
+
+    pub fn define(&mut self, ident: Ident<'s>, expr: Expr<'s>) {
+        tracing::info!("define {ident} = {expr}");
         self.env.insert(ident, expr);
     }
 
     pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Expr<'s>> {
-        self.env.get(ident)
+        self.env
+            .get(ident)
+            .or_else(|| self.enclosing.as_ref().and_then(|t| t.lookup(ident)))
     }
 }
 
@@ -47,8 +89,10 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
     }
 
     pub fn execute(&mut self, line: &'a str) -> Result<(), LoxError<'a>> {
-        let stmt = Parser::new(line).parse()?;
-        self.stmt(stmt)?;
+        let stmts = parser::parse(line);
+        for stmt in stmts {
+            self.stmt(stmt)?;
+        }
 
         self.writer.flush().unwrap();
 
@@ -62,13 +106,24 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
             }
             StmtKind::Print(ref expr) => {
                 let literal = self.expr(expr)?;
+                tracing::debug!("print {literal}");
                 writeln!(self.writer, "{literal}").unwrap();
             }
-            StmtKind::Assign { name, initializer } => self.env.define(name, initializer),
+            StmtKind::DeclVar { name, initializer } => self.env.define(name, initializer),
+            StmtKind::Assign { name, expr } => {
+                if self.env.lookup(&name).is_none() {
+                    let message = format!("undefined variable {name}");
+                    return Err(self.error(message, stmt.span));
+                }
+
+                self.env.define(name, expr)
+            }
             StmtKind::Block(stmts) => {
+                self.env.nest_scope()?;
                 for stmt in stmts {
                     self.stmt(stmt)?;
                 }
+                self.env.exit_scope()?;
             }
         }
 
@@ -196,8 +251,7 @@ mod tests {
 
     fn assert_stmt(program: &str, expected: &str) {
         let mut stdout = BufWriter::new(Vec::new());
-        let stmt = Parser::new(program).parse::<Stmt>().unwrap();
-        Interpreter::new(&mut stdout).stmt(stmt).unwrap();
+        Interpreter::new(&mut stdout).execute(program).unwrap();
         let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
         assert_eq!(output.trim(), expected.to_string());
     }
@@ -222,10 +276,33 @@ mod tests {
     }
 
     #[test]
-    fn interpret_stmt() {
+    fn interpret() {
         assert_stmt("1 + 2;", "");
         assert_stmt("print 1 + 2;", "3");
         assert_stmt(r#"print "1 + 2";"#, "1 + 2");
         assert_stmt(r#"print "Hello, " + "World";"#, "Hello, World");
+        assert_stmt("var x = 10; print x;", "10");
+    }
+
+    #[test]
+    fn interpret_block() {
+        assert_stmt(
+            r#"
+            var x = 10;
+            {
+                x = 20;
+                print x;
+
+                {
+                    x = 30;
+                    print x;
+                }
+
+                print x;
+            }
+            print x;
+        "#,
+            "20\n30\n20\n10",
+        );
     }
 }

@@ -298,15 +298,15 @@ impl<'a> Parse<'a> for Stmt<'a> {
                     Expr::nil()
                 };
 
-                StmtKind::Assign { name, initializer }
+                StmtKind::DeclVar { name, initializer }
             }
             // ident = expr ; (re-assignment)
             TokenKind::Ident(_) => {
                 let name = parser.parse()?;
                 parser.eat(TokenKind::Eq)?;
-                let initializer = parser.parse()?;
+                let expr = parser.parse()?;
 
-                StmtKind::Assign { name, initializer }
+                StmtKind::Assign { name, expr }
             }
             TokenKind::LBrace => {
                 parser.eat(TokenKind::LBrace)?;
@@ -580,7 +580,7 @@ mod tests {
         assert_parse(
             "var x1_foobar;",
             Stmt {
-                kind: StmtKind::Assign {
+                kind: StmtKind::DeclVar {
                     name: Ident("x1_foobar"),
                     initializer: Expr::nil(),
                 },
@@ -590,7 +590,7 @@ mod tests {
         assert_parse(
             "var x = 10;",
             Stmt {
-                kind: StmtKind::Assign {
+                kind: StmtKind::DeclVar {
                     name: Ident("x"),
                     initializer: Expr {
                         kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -605,7 +605,7 @@ mod tests {
             Stmt {
                 kind: StmtKind::Assign {
                     name: Ident("x"),
-                    initializer: Expr {
+                    expr: Expr {
                         kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
                         span: Span::new(4, 6),
                     },
@@ -628,7 +628,7 @@ mod tests {
             "{ var x = 10; }",
             Stmt {
                 kind: StmtKind::Block(vec![Stmt {
-                    kind: StmtKind::Assign {
+                    kind: StmtKind::DeclVar {
                         name: Ident("x"),
                         initializer: Expr {
                             kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -645,7 +645,7 @@ mod tests {
             Stmt {
                 kind: StmtKind::Block(vec![
                     Stmt {
-                        kind: StmtKind::Assign {
+                        kind: StmtKind::DeclVar {
                             name: Ident("x"),
                             initializer: Expr {
                                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
