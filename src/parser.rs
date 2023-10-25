@@ -175,6 +175,8 @@ impl<'a> Parse<'a> for BinOp {
             Plus => BinOp::Plus,
             Slash => BinOp::Div,
             Star => BinOp::Mul,
+            And => BinOp::And,
+            Or => BinOp::Or,
             _ => return parser.unexpected_token(token, "expect binary operator"),
         };
 
@@ -450,6 +452,24 @@ mod tests {
                     }),
                 ),
                 span: Span::new(0, 10),
+            },
+        );
+
+        assert_parse(
+            "true and true",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::And,
+                    Box::new(Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span::new(0, 4),
+                    }),
+                    Box::new(Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span::new(9, 13),
+                    }),
+                ),
+                span: Span::new(0, 13),
             },
         );
 

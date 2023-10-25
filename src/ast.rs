@@ -8,7 +8,9 @@
 //!
 //! expr        -> unary | binary | grouped | literal ;
 //! unary       -> ( "-" | "!" ) expr ;
-//! binary      -> expr ( "!=" | "==" | ">" | ">=" | "<" | "<=" | "-" | "+" | "/" | "*") expr ;
+//! binary      -> expr (
+//!                  "!=" | "==" | ">" | ">=" | "<" | "<=" | "-" | "+" | "/" | "*" | "and" | "or"
+//!                ) expr ;
 //! grouped     -> "(" expr ")" ;
 //! literal     -> NUMBER | STRING | "true" | "false" | "nil" ;
 //!
@@ -49,10 +51,22 @@ impl<'s> Literal<'s> {
             Literal::False
         }
     }
+
+    pub fn truthy(&self) -> bool {
+        !self.falsy()
+    }
+
+    pub fn falsy(&self) -> bool {
+        matches!(self, Literal::False | Literal::Nil)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BinOp {
+    /// "and"
+    And,
+    /// "or"
+    Or,
     /// !=
     Neq,
     /// ==
@@ -168,6 +182,8 @@ impl fmt::Display for BinOp {
             Plus => "+",
             Div => "/",
             Mul => "*",
+            And => "and",
+            Or => "or",
         };
 
         write!(f, "{token}")

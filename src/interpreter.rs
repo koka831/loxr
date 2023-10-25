@@ -176,7 +176,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 match lhs {
                     Literal::String(lhv) if *op == BinOp::Plus => {
                         let Literal::String(rhv) = rhs else {
-                            return Err(self.error("uncompatitive operation".into(), expr.span));
+                            return Err(self.error("incomparable operation".into(), expr.span));
                         };
 
                         let s = format!("{lhv}{rhv}");
@@ -185,7 +185,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     }
                     Literal::Integer(lhv) => {
                         let Literal::Integer(rhv) = rhs else {
-                            return Err(self.error("uncompatitive operation".into(), expr.span));
+                            return Err(self.error("incomparable operation".into(), expr.span));
                         };
 
                         match op {
@@ -199,11 +199,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                             BinOp::Leq => Ok(Literal::from_boolean(lhv <= rhv)),
                             BinOp::Gt => Ok(Literal::from_boolean(lhv > rhv)),
                             BinOp::Geq => Ok(Literal::from_boolean(lhv >= rhv)),
+                            _ => Err(self.error("incomparable operation".into(), expr.span)),
                         }
                     }
                     Literal::Float(lhv) => {
                         let Literal::Float(rhv) = rhs else {
-                            return Err(self.error("uncompatitive operation".into(), expr.span));
+                            return Err(self.error("incomparable operation".into(), expr.span));
                         };
 
                         match op {
@@ -217,9 +218,14 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                             BinOp::Leq => Ok(Literal::from_boolean(lhv <= rhv)),
                             BinOp::Gt => Ok(Literal::from_boolean(lhv > rhv)),
                             BinOp::Geq => Ok(Literal::from_boolean(lhv >= rhv)),
+                            _ => Err(self.error("incomparable operation".into(), expr.span)),
                         }
                     }
-                    _ => Err(self.error("unsupported operation".into(), expr.span)),
+                    _ => match op {
+                        BinOp::And => Ok(Literal::from_boolean(lhs.truthy() && rhs.truthy())),
+                        BinOp::Or => Ok(Literal::from_boolean(lhs.truthy() || rhs.truthy())),
+                        _ => Err(self.error("unsupported operation".into(), expr.span)),
+                    },
                 }
             }
         }
@@ -290,6 +296,11 @@ mod tests {
         assert_redex("2 * 2 + 3", Literal::Integer(7));
         assert_redex("2 * (2 + 3)", Literal::Integer(10));
         assert_redex("2 * 3 + 3 * 4", Literal::Integer(18));
+        assert_redex("true and true", Literal::True);
+        assert_redex("true and false", Literal::False);
+        assert_redex("false or true", Literal::True);
+        assert_redex("false or false", Literal::False);
+        assert_redex("true and nil", Literal::False);
         assert_redex(r#""hello, " + "world""#, Literal::String("hello, world"));
     }
 
