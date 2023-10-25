@@ -12,7 +12,7 @@ pub enum LoxError<'a> {
     UnexpectedEOF,
 
     #[error("unexpected token: {message}, actual: {token}")]
-    UnexpectedToken { message: &'a str, token: Token<'a>, },
+    UnexpectedToken { message: &'a str, token: Token<'a> },
 
     #[error("syntax error at {span:?}: {message}")]
     SyntaxError { message: Cow<'a, str>, span: Span },

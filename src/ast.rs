@@ -24,7 +24,7 @@
 //!             | "{" statement* "}" ;
 //!             | "if" "(" ")" statement ( "else" statement )? ;
 //!             | "while" "(" expression ")" statement ;
-use std::fmt;
+use std::{fmt, rc::Rc};
 
 use crate::span::Span;
 
@@ -134,24 +134,24 @@ pub enum StmtKind<'s> {
     /// var ident ( = expr )? ;
     DeclVar {
         name: Ident<'s>,
-        initializer: Expr<'s>,
+        initializer: Rc<Expr<'s>>,
     },
     // assign a value to a defined variable.
     Assign {
         name: Ident<'s>,
-        expr: Expr<'s>,
+        expr: Rc<Expr<'s>>,
     },
-    Block(Vec<Stmt<'s>>),
+    Block(Vec<Rc<Stmt<'s>>>),
     /// if ( expr ) statement ( else statement )?
     If {
         condition: Expr<'s>,
-        then_branch: Box<Stmt<'s>>,
-        else_branch: Option<Box<Stmt<'s>>>,
+        then_branch: Rc<Stmt<'s>>,
+        else_branch: Option<Rc<Stmt<'s>>>,
     },
     /// while ( expr ) statement
     While {
         condition: Expr<'s>,
-        stmt: Box<Stmt<'s>>,
+        stmt: Rc<Stmt<'s>>,
     },
 }
 

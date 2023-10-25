@@ -1,5 +1,6 @@
-use std::{borrow::Cow, io};
+use std::{borrow::Cow, fmt, io, rc::Rc};
 
+use anyhow::anyhow;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -14,9 +15,29 @@ pub struct Environment<'scope> {
     table: SymbolTable<'scope>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+/// represents runtime value
+pub enum Rt<'s> {
+    Literal(Literal<'s>),
+}
+impl<'s> Rt<'s> {
+    pub fn truthy(&self) -> bool {
+        match self {
+            Rt::Literal(l) => l.truthy(),
+        }
+    }
+}
+impl<'s> fmt::Display for Rt<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Rt::Literal(l) => l.fmt(f),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SymbolTable<'scope> {
-    env: FxHashMap<Ident<'scope>, Expr<'scope>>,
+    env: FxHashMap<Ident<'scope>, Rt<'scope>>,
     enclosing: Option<Box<SymbolTable<'scope>>>,
 }
 
@@ -26,13 +47,16 @@ impl<'s> Environment<'s> {
         Environment { table }
     }
 
-    // #[tracing::instrument(skip(self))]
-    pub fn define(&mut self, ident: Ident<'s>, expr: Expr<'s>) {
-        tracing::info!("define {ident} = {expr}");
+    pub fn define(&mut self, ident: Ident<'s>, expr: Rt<'s>) {
+        tracing::info!("define {ident} = {expr:?}");
         self.table.define(ident, expr);
     }
 
-    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Expr<'s>> {
+    pub fn assign(&mut self, ident: Ident<'s>, expr: Rt<'s>) -> Result<(), LoxError<'s>> {
+        self.table.assign(ident, expr)
+    }
+
+    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Rt<'s>> {
         self.table.lookup(ident)
     }
 
@@ -60,12 +84,26 @@ impl<'s> SymbolTable<'s> {
         SymbolTable { env, enclosing }
     }
 
-    pub fn define(&mut self, ident: Ident<'s>, expr: Expr<'s>) {
-        tracing::info!("define {ident} = {expr}");
+    pub fn define(&mut self, ident: Ident<'s>, expr: Rt<'s>) {
         self.env.insert(ident, expr);
     }
 
-    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Expr<'s>> {
+    pub fn assign(&mut self, ident: Ident<'s>, expr: Rt<'s>) -> Result<(), LoxError<'s>> {
+        if self.env.get(&ident).is_some() {
+            self.define(ident, expr);
+        } else {
+            match &mut self.enclosing {
+                Some(e) => {
+                    e.assign(ident, expr)?;
+                }
+                None => return Err(LoxError::Other(anyhow!("undefined variable"))),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Rt<'s>> {
         self.env
             .get(ident)
             .or_else(|| self.enclosing.as_ref().and_then(|t| t.lookup(ident)))
@@ -89,9 +127,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
     }
 
     pub fn execute(&mut self, line: &'a str) -> Result<(), LoxError<'a>> {
-        let stmts = parser::parse(line);
+        let stmts = parser::parse(line).into_iter().map(Rc::new);
         for stmt in stmts {
-            self.stmt(stmt)?;
+            if let Err(e) = self.stmt(stmt) {
+                writeln!(self.writer, "{e}").unwrap();
+                return Err(LoxError::Other(anyhow!("runtime error")));
+            }
         }
 
         self.writer.flush().unwrap();
@@ -99,8 +140,8 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
         Ok(())
     }
 
-    fn stmt(&mut self, stmt: Stmt<'a>) -> Result<(), LoxError<'a>> {
-        match stmt.kind {
+    fn stmt(&mut self, stmt: Rc<Stmt<'a>>) -> Result<(), LoxError<'a>> {
+        match &stmt.kind {
             StmtKind::Expr(ref expr) => {
                 self.expr(expr)?;
             }
@@ -109,19 +150,21 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 tracing::debug!("print {literal}");
                 writeln!(self.writer, "{literal}").unwrap();
             }
-            StmtKind::DeclVar { name, initializer } => self.env.define(name, initializer),
+            StmtKind::DeclVar { name, initializer } => {
+                self.env.define(name.clone(), self.expr(initializer)?)
+            }
             StmtKind::Assign { name, expr } => {
-                if self.env.lookup(&name).is_none() {
+                if self.env.lookup(name).is_none() {
                     let message = format!("undefined variable {name}");
                     return Err(self.error(message, stmt.span));
                 }
 
-                self.env.define(name, expr)
+                self.env.assign(name.clone(), self.expr(expr)?)?
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
                 for stmt in stmts {
-                    self.stmt(stmt)?;
+                    self.stmt(stmt.clone())?;
                 }
                 self.env.exit_scope()?;
             }
@@ -129,12 +172,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 condition,
                 then_branch,
                 else_branch,
-            } => match self.expr(&condition)? {
-                boolean @ (Literal::True | Literal::False) => {
-                    if boolean == Literal::True {
-                        self.stmt(*then_branch)?;
+            } => match self.expr(condition)? {
+                cond @ (Rt::Literal(Literal::True) | Rt::Literal(Literal::False)) => {
+                    if cond.truthy() {
+                        self.stmt(then_branch.clone())?;
                     } else if let Some(else_branch) = else_branch {
-                        self.stmt(*else_branch)?;
+                        self.stmt(else_branch.clone())?;
                     }
                 }
                 _ => {
@@ -144,9 +187,8 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 }
             },
             StmtKind::While { condition, stmt } => {
-                while self.expr(&condition)?.truthy() {
-                    todo!()
-                    // self.stmt(*stmt)?;
+                while self.expr(condition)?.truthy() {
+                    self.stmt(stmt.clone())?;
                 }
             }
         }
@@ -154,13 +196,13 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
         Ok(())
     }
 
-    fn expr(&self, expr: &Expr<'a>) -> Result<Literal<'a>, LoxError<'a>> {
+    fn expr(&self, expr: &Expr<'a>) -> Result<Rt<'a>, LoxError<'a>> {
         match &expr.kind {
             ExprKind::Term(term) => Ok(self.term(term)?),
             ExprKind::Unary(op, expr) => match expr.kind {
                 ExprKind::Term(Term::Literal(literal)) => {
                     let lit = self
-                        .apply_unary(*op, literal)
+                        .apply_unary(*op, Rt::Literal(literal))
                         .map_err(|e| self.error(e, expr.span))?;
 
                     Ok(lit)
@@ -180,66 +222,74 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 let rhs = self.expr(rhs)?;
 
                 match lhs {
-                    Literal::String(lhv) if *op == BinOp::Plus => {
-                        let Literal::String(rhv) = rhs else {
+                    Rt::Literal(Literal::String(lhv)) if *op == BinOp::Plus => {
+                        let Rt::Literal(Literal::String(rhv)) = rhs else {
                             return Err(self.error("incomparable operation".into(), expr.span));
                         };
 
                         let s = format!("{lhv}{rhv}");
                         // FIXME: hold static string or cow
-                        Ok(Literal::String(s.leak()))
+                        Ok(Rt::Literal(Literal::String(s.leak())))
                     }
-                    Literal::Integer(lhv) => {
-                        let Literal::Integer(rhv) = rhs else {
+                    Rt::Literal(Literal::Integer(lhv)) => {
+                        let Rt::Literal(Literal::Integer(rhv)) = rhs else {
                             return Err(self.error("incomparable operation".into(), expr.span));
                         };
 
-                        match op {
-                            BinOp::Plus => Ok(Literal::Integer(lhv + rhv)),
-                            BinOp::Minus => Ok(Literal::Integer(lhv - rhv)),
-                            BinOp::Mul => Ok(Literal::Integer(lhv * rhv)),
-                            BinOp::Div => Ok(Literal::Integer(lhv / rhv)),
-                            BinOp::Eq => Ok(Literal::from_boolean(lhv == rhv)),
-                            BinOp::Neq => Ok(Literal::from_boolean(lhv != rhv)),
-                            BinOp::Lt => Ok(Literal::from_boolean(lhv < rhv)),
-                            BinOp::Leq => Ok(Literal::from_boolean(lhv <= rhv)),
-                            BinOp::Gt => Ok(Literal::from_boolean(lhv > rhv)),
-                            BinOp::Geq => Ok(Literal::from_boolean(lhv >= rhv)),
-                            _ => Err(self.error("incomparable operation".into(), expr.span)),
-                        }
+                        let v = match op {
+                            BinOp::Plus => Literal::Integer(lhv + rhv),
+                            BinOp::Minus => Literal::Integer(lhv - rhv),
+                            BinOp::Mul => Literal::Integer(lhv * rhv),
+                            BinOp::Div => Literal::Integer(lhv / rhv),
+                            BinOp::Eq => Literal::from_boolean(lhv == rhv),
+                            BinOp::Neq => Literal::from_boolean(lhv != rhv),
+                            BinOp::Lt => Literal::from_boolean(lhv < rhv),
+                            BinOp::Leq => Literal::from_boolean(lhv <= rhv),
+                            BinOp::Gt => Literal::from_boolean(lhv > rhv),
+                            BinOp::Geq => Literal::from_boolean(lhv >= rhv),
+                            _ => return Err(self.error("incomparable operation".into(), expr.span)),
+                        };
+
+                        Ok(Rt::Literal(v))
                     }
-                    Literal::Float(lhv) => {
-                        let Literal::Float(rhv) = rhs else {
+                    Rt::Literal(Literal::Float(lhv)) => {
+                        let Rt::Literal(Literal::Float(rhv)) = rhs else {
                             return Err(self.error("incomparable operation".into(), expr.span));
                         };
 
-                        match op {
-                            BinOp::Plus => Ok(Literal::Float(lhv + rhv)),
-                            BinOp::Minus => Ok(Literal::Float(lhv - rhv)),
-                            BinOp::Mul => Ok(Literal::Float(lhv * rhv)),
-                            BinOp::Div => Ok(Literal::Float(lhv / rhv)),
-                            BinOp::Eq => Ok(Literal::from_boolean(lhv == rhv)),
-                            BinOp::Neq => Ok(Literal::from_boolean(lhv != rhv)),
-                            BinOp::Lt => Ok(Literal::from_boolean(lhv < rhv)),
-                            BinOp::Leq => Ok(Literal::from_boolean(lhv <= rhv)),
-                            BinOp::Gt => Ok(Literal::from_boolean(lhv > rhv)),
-                            BinOp::Geq => Ok(Literal::from_boolean(lhv >= rhv)),
-                            _ => Err(self.error("incomparable operation".into(), expr.span)),
-                        }
+                        let v = match op {
+                            BinOp::Plus => Literal::Float(lhv + rhv),
+                            BinOp::Minus => Literal::Float(lhv - rhv),
+                            BinOp::Mul => Literal::Float(lhv * rhv),
+                            BinOp::Div => Literal::Float(lhv / rhv),
+                            BinOp::Eq => Literal::from_boolean(lhv == rhv),
+                            BinOp::Neq => Literal::from_boolean(lhv != rhv),
+                            BinOp::Lt => Literal::from_boolean(lhv < rhv),
+                            BinOp::Leq => Literal::from_boolean(lhv <= rhv),
+                            BinOp::Gt => Literal::from_boolean(lhv > rhv),
+                            BinOp::Geq => Literal::from_boolean(lhv >= rhv),
+                            _ => return Err(self.error("incomparable operation".into(), expr.span)),
+                        };
+
+                        Ok(Rt::Literal(v))
                     }
-                    _ => match op {
-                        BinOp::And => Ok(Literal::from_boolean(lhs.truthy() && rhs.truthy())),
-                        BinOp::Or => Ok(Literal::from_boolean(lhs.truthy() || rhs.truthy())),
-                        _ => Err(self.error("unsupported operation".into(), expr.span)),
-                    },
+                    _ => {
+                        let v = match op {
+                            BinOp::And => Literal::from_boolean(lhs.truthy() && rhs.truthy()),
+                            BinOp::Or => Literal::from_boolean(lhs.truthy() || rhs.truthy()),
+                            _ => return Err(self.error("unsupported operation".into(), expr.span)),
+                        };
+
+                        Ok(Rt::Literal(v))
+                    }
                 }
             }
         }
     }
 
-    fn term(&self, term: &Term<'a>) -> Result<Literal<'a>, LoxError<'a>> {
+    fn term(&self, term: &Term<'a>) -> Result<Rt<'a>, LoxError<'a>> {
         match &term {
-            Term::Literal(lit) => Ok(*lit),
+            Term::Literal(lit) => Ok(Rt::Literal(*lit)),
             Term::Grouped(box expr) => Ok(self.expr(expr)?),
             Term::Ident(ident) => {
                 let Some(value) = self.env.lookup(ident) else {
@@ -249,19 +299,21 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     );
                 };
 
-                Ok(self.expr(value)?)
+                Ok(value.clone())
             }
         }
     }
 
-    fn apply_unary(&self, op: UnOp, lit: Literal<'a>) -> Result<Literal<'a>, String> {
-        match lit {
-            Literal::True if op == UnOp::Not => Ok(Literal::False),
-            Literal::False if op == UnOp::Not => Ok(Literal::True),
-            Literal::Integer(n) if op == UnOp::Minus => Ok(Literal::Integer(-n)),
-            Literal::Float(n) if op == UnOp::Minus => Ok(Literal::Float(-n)),
-            _ => Err(format!("cannot apply operation `{op}` to `{lit}`")),
-        }
+    fn apply_unary(&self, op: UnOp, v: Rt<'a>) -> Result<Rt<'a>, String> {
+        let v = match v {
+            Rt::Literal(Literal::True) if op == UnOp::Not => Literal::False,
+            Rt::Literal(Literal::False) if op == UnOp::Not => Literal::True,
+            Rt::Literal(Literal::Integer(n)) if op == UnOp::Minus => Literal::Integer(-n),
+            Rt::Literal(Literal::Float(n)) if op == UnOp::Minus => Literal::Float(-n),
+            _ => return Err(format!("cannot apply operation `{op}` to `{v}`")),
+        };
+
+        Ok(Rt::Literal(v))
     }
 }
 
@@ -276,7 +328,7 @@ mod tests {
         let mut stdout = BufWriter::new(Vec::new());
         let expr = Parser::new(program).parse::<Expr>().unwrap();
         let reducted = Interpreter::new(&mut stdout).expr(&expr).unwrap();
-        assert_eq!(reducted, expected)
+        assert_eq!(reducted, Rt::Literal(expected))
     }
 
     fn assert_stmt(program: &str, expected: &str) {
@@ -325,7 +377,7 @@ mod tests {
             r#"
             var x = 10;
             {
-                x = 20;
+                var x = 20;
                 print x;
 
                 {
@@ -337,7 +389,7 @@ mod tests {
             }
             print x;
         "#,
-            "20\n30\n20\n10",
+            "20\n30\n30\n10",
         );
     }
 
@@ -345,5 +397,10 @@ mod tests {
     fn interpret_if_stmt() {
         assert_stmt(r#"if(true) { print 10; } else { print 0; }"#, "10");
         assert_stmt(r#"if(false) { print 10; } else { print 0; }"#, "0");
+    }
+
+    #[test]
+    fn interpret_while_stmt() {
+        assert_stmt("var x = 3; while(x > 0) { x = x - 1; print x; }", "2\n1\n0");
     }
 }
