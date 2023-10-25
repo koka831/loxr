@@ -143,6 +143,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     return Err(self.error(message, stmt.span));
                 }
             },
+            StmtKind::While { condition, stmt } => {
+                while self.expr(&condition)?.truthy() {
+                    todo!()
+                    // self.stmt(*stmt)?;
+                }
+            }
         }
 
         Ok(())

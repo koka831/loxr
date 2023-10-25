@@ -336,6 +336,19 @@ impl<'a> Parse<'a> for Stmt<'a> {
                     span,
                 });
             }
+            TokenKind::While => {
+                parser.eat(TokenKind::While)?;
+                parser.eat(TokenKind::LParen)?;
+                let condition = parser.parse()?;
+                parser.eat(TokenKind::RParen)?;
+
+                let stmt = Box::new(parser.parse()?);
+
+                return Ok(Stmt {
+                    kind: StmtKind::While { condition, stmt },
+                    span: span.to(parser.current_span()),
+                });
+            }
             _ => {
                 let expr = parser.parse::<Expr>()?;
 
@@ -763,6 +776,29 @@ mod tests {
                     })),
                 },
                 span: Span { base: 0, len: 106 },
+            },
+        );
+    }
+
+    #[test]
+    fn parse_while_stmt() {
+        assert_parse(
+            "while (true) print 10;",
+            Stmt {
+                kind: StmtKind::While {
+                    condition: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span::new(7, 11),
+                    },
+                    stmt: Box::new(Stmt {
+                        kind: StmtKind::Print(Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                            span: Span::new(19, 21),
+                        }),
+                        span: Span::new(13, 22),
+                    }),
+                },
+                span: Span::new(0, 22),
             },
         );
     }

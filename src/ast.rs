@@ -23,6 +23,7 @@
 //!             | ( "var" )? ident "=" expression ";" ;
 //!             | "{" statement* "}" ;
 //!             | "if" "(" ")" statement ( "else" statement )? ;
+//!             | "while" "(" expression ")" statement ;
 use std::fmt;
 
 use crate::span::Span;
@@ -97,7 +98,6 @@ pub enum Term<'s> {
     Ident(Ident<'s>),
 }
 
-#[non_exhaustive]
 #[derive(Debug, PartialEq)]
 pub enum ExprKind<'s> {
     Binary(BinOp, Box<Expr<'s>>, Box<Expr<'s>>),
@@ -147,6 +147,11 @@ pub enum StmtKind<'s> {
         condition: Expr<'s>,
         then_branch: Box<Stmt<'s>>,
         else_branch: Option<Box<Stmt<'s>>>,
+    },
+    /// while ( expr ) statement
+    While {
+        condition: Expr<'s>,
+        stmt: Box<Stmt<'s>>,
     },
 }
 
