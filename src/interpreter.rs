@@ -185,7 +185,30 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     self.stmt(stmt.clone())?;
                 }
             }
-            _ => unimplemented!(),
+            StmtKind::For {
+                init,
+                test,
+                after,
+                body,
+            } => {
+                self.env.nest_scope()?;
+                self.stmt(Rc::clone(init))?;
+                loop {
+                    if let Some(test) = test {
+                        if !self.expr(test)?.truthy() {
+                            break;
+                        }
+
+                        self.stmt(Rc::clone(body))?;
+
+                        if let Some(after) = after {
+                            self.expr(&Rc::clone(after))?;
+                        }
+                    }
+                }
+
+                self.env.exit_scope()?;
+            }
         }
 
         Ok(())

@@ -406,6 +406,7 @@ impl<'a> Parse<'a> for Stmt<'a> {
                 return Ok(stmt);
             }
             TokenKind::For => {
+                tracing::debug!("parse for statement");
                 parser.eat(TokenKind::For)?;
                 parser.eat(TokenKind::LParen)?;
 
@@ -422,12 +423,15 @@ impl<'a> Parse<'a> for Stmt<'a> {
                         });
                     }
                 };
-                let test = if parser.eat(TokenKind::Semicolon).is_ok() {
+                let token = parser.peek()?;
+                let test = if token.kind != TokenKind::RParen {
+                    tracing::debug!("parsing for:test section");
                     Some(Rc::new(parser.parse()?))
                 } else {
                     None
                 };
                 let after = if parser.eat(TokenKind::Semicolon).is_ok() {
+                    tracing::debug!("parsing for:after section");
                     Some(Rc::new(parser.parse()?))
                 } else {
                     None
