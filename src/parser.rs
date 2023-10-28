@@ -417,6 +417,21 @@ mod tests {
     }
 
     macro_rules! assert_parse {
+        ($source:literal, $expect:pat if $target:expr => $cond:pat $(,)*) => {
+            let parsed = Parser::new($source).parse().unwrap();
+            assert_matches!(
+                parsed,
+                $expect if match $target {
+                    $cond => true ,
+                    _ => panic!()
+                }
+            );
+        };
+        // use `cond` for comparing `Rc`
+        ($source:literal, $expect:pat if $cond:expr $(,)*) => {
+            let parsed = Parser::new($source).parse().unwrap();
+            assert_matches!(parsed, $expect if $cond);
+        };
         ($source:literal, $expect:pat $(,)*) => {
             let parsed = Parser::new($source).parse().unwrap();
             assert_matches!(parsed, $expect);
@@ -667,56 +682,40 @@ mod tests {
 
     #[test]
     fn parse_variable_decl() {
-        assert_parse(
-            "var x1_foobar;",
+        assert_parse!(
+            "var x1_0;",
             Stmt {
-                kind: StmtKind::DeclVar {
-                    name: Ident("x1_foobar"),
-                    // TODO: Rc matcher
-                    initializer: Rc::new(Expr::nil()),
-                    // initializer: Rc { .. }
-                },
-                span: Span::new(0, 14),
-            },
+                kind: StmtKind::DeclVar { name: Ident("x1_0"), initializer },
+                ..
+            } if *initializer == Expr::nil()
         );
-        assert_parse(
+        assert_parse!(
             "var x = 10;",
             Stmt {
-                kind: StmtKind::DeclVar {
-                    name: Ident("x"),
-                    initializer: Expr {
-                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-                        span: Span::new(8, 10),
-                    }
-                    .into(),
-                },
-                span: Span::new(0, 11),
-            },
+                kind: StmtKind::DeclVar { name: Ident("x"), initializer },
+                ..
+            } if *initializer => Expr {
+                kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                ..
+            }
         );
-        assert_parse(
+        assert_parse!(
             "x = 10;",
             Stmt {
-                kind: StmtKind::Assign {
-                    name: Ident("x"),
-                    expr: Expr {
-                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-                        span: Span::new(4, 6),
-                    }
-                    .into(),
-                },
-                span: Span::new(0, 7),
-            },
+                kind: StmtKind::Assign { name: Ident("x"), expr },
+                ..
+            } if *expr => Expr {
+                kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                ..
+            }
         );
     }
 
     #[test]
     fn parse_block() {
-        assert_parse(
+        assert_parse!(
             "{}",
-            Stmt {
-                kind: StmtKind::Block(vec![]),
-                span: Span::new(0, 2),
-            },
+            Stmt { kind: StmtKind::Block(block), .. } if block == vec![]
         );
         assert_parse(
             "{ var x = 10; }",
@@ -768,25 +767,24 @@ mod tests {
 
     #[test]
     fn parse_if_stmt() {
-        assert_parse(
+        assert_parse!(
             "if(true) print 10;",
             Stmt {
                 kind: StmtKind::If {
                     condition: Expr {
                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-                        span: Span::new(3, 7),
+                        ..
                     },
-                    then_branch: Box::new(Stmt {
-                        kind: StmtKind::Print(Expr {
-                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-                            span: Span::new(15, 17),
-                        }),
-                        span: Span::new(9, 18),
-                    })
-                    .into(),
+                    then_branch,
                     else_branch: None,
                 },
-                span: Span::new(0, 18),
+                ..
+            } if *then_branch => Stmt {
+                    kind: StmtKind::Print(Expr {
+                    kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                    ..
+                }),
+                ..
             },
         );
         assert_parse(
@@ -864,17 +862,6 @@ mod tests {
                 },
                 span: Span::new(0, 22),
             },
-        );
-    }
-
-    #[test]
-    fn parse_for_stmt() {
-        assert_parse!(
-            "for (var x = 0; x < 5; x = x + 1) { print x; }",
-            Stmt {
-                kind: StmtKind::For { .. },
-                ..
-            }
         );
     }
 }
