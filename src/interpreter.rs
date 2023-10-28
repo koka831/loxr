@@ -48,20 +48,23 @@ impl<'s> Environment<'s> {
     }
 
     pub fn define(&mut self, ident: Ident<'s>, expr: Rt<'s>) {
-        tracing::info!("define {ident} = {expr:?}");
+        tracing::info!("define {ident} = {expr}");
         self.table.define(ident, expr);
     }
 
     pub fn assign(&mut self, ident: Ident<'s>, expr: Rt<'s>) -> Result<(), LoxError<'s>> {
+        tracing::info!("assign {ident} = {expr}");
         self.table.assign(ident, expr)
     }
 
     pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Rt<'s>> {
+        tracing::debug!("look up {ident}");
         self.table.lookup(ident)
     }
 
     /// creates a nested/scoped environment that is used while executing a block statement.
     pub fn nest_scope<'a>(&mut self) -> Result<(), LoxError<'a>> {
+        tracing::info!("create an nested block");
         let current_table = std::mem::take(&mut self.table);
         self.table = SymbolTable {
             enclosing: Some(Box::new(current_table)),
@@ -71,6 +74,7 @@ impl<'s> Environment<'s> {
     }
 
     pub fn exit_scope<'a>(&mut self) -> Result<(), LoxError<'a>> {
+        tracing::info!("exit an nested block");
         assert!(self.table.enclosing.is_some());
         self.table = *self.table.enclosing.take().unwrap();
         Ok(())
@@ -194,8 +198,10 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 self.env.nest_scope()?;
                 self.stmt(Rc::clone(init))?;
                 loop {
+                    self.env.nest_scope()?;
                     if let Some(test) = test {
                         if !self.expr(test)?.truthy() {
+                            self.env.exit_scope()?;
                             break;
                         }
 
@@ -205,6 +211,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                             self.expr(&Rc::clone(after))?;
                         }
                     }
+                    self.env.exit_scope()?;
                 }
 
                 self.env.exit_scope()?;
