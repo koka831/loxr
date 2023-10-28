@@ -191,6 +191,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     self.stmt(stmt.clone())?;
                 }
             }
+            _ => unimplemented!()
         }
 
         Ok(())
@@ -241,12 +242,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                             BinOp::Minus => Literal::Integer(lhv - rhv),
                             BinOp::Mul => Literal::Integer(lhv * rhv),
                             BinOp::Div => Literal::Integer(lhv / rhv),
-                            BinOp::Eq => Literal::from_boolean(lhv == rhv),
-                            BinOp::Neq => Literal::from_boolean(lhv != rhv),
-                            BinOp::Lt => Literal::from_boolean(lhv < rhv),
-                            BinOp::Leq => Literal::from_boolean(lhv <= rhv),
-                            BinOp::Gt => Literal::from_boolean(lhv > rhv),
-                            BinOp::Geq => Literal::from_boolean(lhv >= rhv),
+                            BinOp::Eq => Literal::from(lhv == rhv),
+                            BinOp::Neq => Literal::from(lhv != rhv),
+                            BinOp::Lt => Literal::from(lhv < rhv),
+                            BinOp::Leq => Literal::from(lhv <= rhv),
+                            BinOp::Gt => Literal::from(lhv > rhv),
+                            BinOp::Geq => Literal::from(lhv >= rhv),
                             _ => return Err(self.error("incomparable operation".into(), expr.span)),
                         };
 
@@ -262,12 +263,12 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                             BinOp::Minus => Literal::Float(lhv - rhv),
                             BinOp::Mul => Literal::Float(lhv * rhv),
                             BinOp::Div => Literal::Float(lhv / rhv),
-                            BinOp::Eq => Literal::from_boolean(lhv == rhv),
-                            BinOp::Neq => Literal::from_boolean(lhv != rhv),
-                            BinOp::Lt => Literal::from_boolean(lhv < rhv),
-                            BinOp::Leq => Literal::from_boolean(lhv <= rhv),
-                            BinOp::Gt => Literal::from_boolean(lhv > rhv),
-                            BinOp::Geq => Literal::from_boolean(lhv >= rhv),
+                            BinOp::Eq => Literal::from(lhv == rhv),
+                            BinOp::Neq => Literal::from(lhv != rhv),
+                            BinOp::Lt => Literal::from(lhv < rhv),
+                            BinOp::Leq => Literal::from(lhv <= rhv),
+                            BinOp::Gt => Literal::from(lhv > rhv),
+                            BinOp::Geq => Literal::from(lhv >= rhv),
                             _ => return Err(self.error("incomparable operation".into(), expr.span)),
                         };
 
@@ -275,8 +276,8 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     }
                     _ => {
                         let v = match op {
-                            BinOp::And => Literal::from_boolean(lhs.truthy() && rhs.truthy()),
-                            BinOp::Or => Literal::from_boolean(lhs.truthy() || rhs.truthy()),
+                            BinOp::And => Literal::from(lhs.truthy() && rhs.truthy()),
+                            BinOp::Or => Literal::from(lhs.truthy() || rhs.truthy()),
                             _ => return Err(self.error("unsupported operation".into(), expr.span)),
                         };
 

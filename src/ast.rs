@@ -24,6 +24,7 @@
 //!             | "{" statement* "}" ;
 //!             | "if" "(" ")" statement ( "else" statement )? ;
 //!             | "while" "(" expression ")" statement ;
+//!             | "for" "(" (DeclVar | expr stmt | ";") expression? ";" expression? ")" statement ;
 use std::{fmt, rc::Rc};
 
 use crate::span::Span;
@@ -45,20 +46,22 @@ pub enum Literal<'s> {
 }
 
 impl<'s> Literal<'s> {
-    pub fn from_boolean(b: bool) -> Literal<'s> {
-        if b {
-            Literal::True
-        } else {
-            Literal::False
-        }
-    }
-
     pub fn truthy(&self) -> bool {
         !self.falsy()
     }
 
     pub fn falsy(&self) -> bool {
         matches!(self, Literal::False | Literal::Nil)
+    }
+}
+
+impl<'s> From<bool> for Literal<'s> {
+    fn from(value: bool) -> Self {
+        if value {
+            Literal::True
+        } else {
+            Literal::False
+        }
     }
 }
 
@@ -152,6 +155,13 @@ pub enum StmtKind<'s> {
     While {
         condition: Expr<'s>,
         stmt: Rc<Stmt<'s>>,
+    },
+    /// for (init; (test; (after;)? )?) stmt
+    For {
+        init: Rc<Stmt<'s>>,
+        test: Option<Rc<Expr<'s>>>,
+        after: Option<Rc<Expr<'s>>>,
+        body: Rc<Stmt<'s>>,
     },
 }
 
