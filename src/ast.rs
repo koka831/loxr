@@ -12,6 +12,7 @@
 //!                  "!=" | "==" | ">" | ">=" | "<" | "<=" | "-" | "+" | "/" | "*" | "and" | "or"
 //!                ) expr ;
 //! grouped     -> "(" expr ")" ;
+//! assignment  -> ident "=" expr ;
 //! literal     -> NUMBER | STRING | "true" | "false" | "nil" ;
 //!
 //! ## Statements:
@@ -20,7 +21,7 @@
 //!
 //! statement   -> expression ";" ;
 //!             | "print" expression ";" ;
-//!             | ( "var" )? ident "=" expression ";" ;
+//!             | "var" ident "=" expression ";" ;
 //!             | "{" statement* "}" ;
 //!             | "if" "(" ")" statement ( "else" statement )? ;
 //!             | "while" "(" expression ")" statement ;
@@ -106,6 +107,11 @@ pub enum ExprKind<'s> {
     Binary(BinOp, Box<Expr<'s>>, Box<Expr<'s>>),
     Unary(UnOp, Box<Expr<'s>>),
     Term(Term<'s>),
+    // assign a value to a defined variable.
+    Assign {
+        name: Ident<'s>,
+        expr: Box<Expr<'s>>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -138,11 +144,6 @@ pub enum StmtKind<'s> {
     DeclVar {
         name: Ident<'s>,
         initializer: Rc<Expr<'s>>,
-    },
-    // assign a value to a defined variable.
-    Assign {
-        name: Ident<'s>,
-        expr: Rc<Expr<'s>>,
     },
     Block(Vec<Rc<Stmt<'s>>>),
     /// if ( expr ) statement ( else statement )?
@@ -248,6 +249,45 @@ impl<'s> fmt::Display for Expr<'s> {
                 write!(f, "{lhs} {op} {rhs}")
             }
             ExprKind::Term(term) => term.fmt(f),
+            ExprKind::Assign { name, box expr } => {
+                write!(f, "{name} = {expr}")
+            }
+        }
+    }
+}
+
+impl<'s> fmt::Display for Stmt<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            StmtKind::Expr(expr) => expr.fmt(f),
+            StmtKind::Print(expr) => write!(f, "print {expr}"),
+            StmtKind::DeclVar { name, initializer } => write!(f, "var {name} = {initializer}"),
+            StmtKind::Block(block) => write!(f, "{{ {} lines }}", block.len()),
+            StmtKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => match else_branch {
+                None => write!(f, "if ({condition}) {then_branch}"),
+                Some(else_branch) => write!(f, "if ({condition}) {then_branch} else {else_branch}"),
+            },
+            StmtKind::While { condition, stmt } => write!(f, "while ({condition}) {stmt}"),
+            StmtKind::For {
+                init,
+                test,
+                after,
+                body,
+            } => {
+                write!(f, "for ({init}")?;
+                if let Some(test) = test {
+                    write!(f, "; {test}")?;
+                }
+                if let Some(after) = after {
+                    write!(f, "; {after}")?;
+                }
+                write!(f, ")")?;
+                write!(f, "{body}")
+            }
         }
     }
 }

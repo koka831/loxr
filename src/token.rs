@@ -88,7 +88,13 @@ pub enum NumberKind {
 
 impl<'a> fmt::Display for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let token = match self.kind {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl<'a> fmt::Display for TokenKind<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let token = match self {
             TokenKind::And => "and",
             TokenKind::Class => "class",
             TokenKind::Else => "else",

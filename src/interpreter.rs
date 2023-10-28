@@ -127,10 +127,11 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
     }
 
     pub fn execute(&mut self, line: &'a str) -> Result<(), LoxError<'a>> {
-        let stmts = parser::parse(line).into_iter().map(Rc::new);
+        let stmts = parser::parse(line)?.into_iter().map(Rc::new);
         for stmt in stmts {
             if let Err(e) = self.stmt(stmt) {
                 writeln!(self.writer, "{e}").unwrap();
+                self.writer.flush().unwrap();
                 return Err(LoxError::Other(anyhow!("runtime error")));
             }
         }
@@ -151,15 +152,8 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 writeln!(self.writer, "{literal}").unwrap();
             }
             StmtKind::DeclVar { name, initializer } => {
-                self.env.define(name.clone(), self.expr(initializer)?)
-            }
-            StmtKind::Assign { name, expr } => {
-                if self.env.lookup(name).is_none() {
-                    let message = format!("undefined variable {name}");
-                    return Err(self.error(message, stmt.span));
-                }
-
-                self.env.assign(name.clone(), self.expr(expr)?)?
+                let evaluated = self.expr(initializer)?;
+                self.env.define(name.clone(), evaluated)
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
@@ -191,13 +185,13 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     self.stmt(stmt.clone())?;
                 }
             }
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
 
         Ok(())
     }
 
-    fn expr(&self, expr: &Expr<'a>) -> Result<Rt<'a>, LoxError<'a>> {
+    fn expr(&mut self, expr: &Expr<'a>) -> Result<Rt<'a>, LoxError<'a>> {
         match &expr.kind {
             ExprKind::Term(term) => Ok(self.term(term)?),
             ExprKind::Unary(op, expr) => match expr.kind {
@@ -285,10 +279,20 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     }
                 }
             }
+            ExprKind::Assign { name, expr } => {
+                if self.env.lookup(name).is_none() {
+                    let message = format!("undefined variable {name}");
+                    return Err(self.error(message, expr.span));
+                }
+
+                let evaluated = self.expr(expr)?;
+                self.env.assign(name.clone(), evaluated.clone())?;
+                Ok(evaluated)
+            }
         }
     }
 
-    fn term(&self, term: &Term<'a>) -> Result<Rt<'a>, LoxError<'a>> {
+    fn term(&mut self, term: &Term<'a>) -> Result<Rt<'a>, LoxError<'a>> {
         match &term {
             Term::Literal(lit) => Ok(Rt::Literal(*lit)),
             Term::Grouped(box expr) => Ok(self.expr(expr)?),

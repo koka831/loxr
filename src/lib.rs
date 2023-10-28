@@ -53,7 +53,10 @@ pub fn exec_file<'s, P: AsRef<Path> + 's>(path: P) -> Result<(), LoxError<'s>> {
     let content = std::fs::read_to_string(path).unwrap();
 
     let mut out = BufWriter::new(io::stdout());
-    Interpreter::new(&mut out).execute(&content).unwrap();
+    match Interpreter::new(&mut out).execute(&content) {
+        Ok(_) => {}
+        Err(e) => eprintln!("{e}"),
+    }
 
     Ok(())
 }

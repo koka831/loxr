@@ -10,14 +10,18 @@ use crate::{
 
 type ParseResult<'s, T> = std::result::Result<T, LoxError<'s>>;
 
-pub fn parse(source: &str) -> Vec<Stmt<'_>> {
+pub fn parse(source: &str) -> Result<Vec<Stmt<'_>>, LoxError<'_>> {
     let mut parser = Parser::new(source);
     let mut stmts = Vec::new();
-    while let Ok(stmt) = parser.parse() {
+    while !parser.eof() {
+        let stmt = match parser.parse() {
+            Ok(stmt) => stmt,
+            Err(e) => return Err(e),
+        };
         stmts.push(stmt);
     }
 
-    stmts
+    Ok(stmts)
 }
 
 pub trait Parse<'a>: Sized {
@@ -59,6 +63,10 @@ impl<'a> TokenStream<'a> {
         self.peeked = self.tokens.next();
         next
     }
+
+    fn eof(&self) -> bool {
+        self.peek().is_none()
+    }
 }
 
 pub struct Parser<'a> {
@@ -75,14 +83,21 @@ impl<'a> Parser<'a> {
         Parse::<'a>::parse(self)
     }
 
-    fn unexpected_token<T>(&self, token: &Token<'a>, message: &'a str) -> ParseResult<'a, T> {
-        let token = token.clone();
-        Err(LoxError::UnexpectedToken { message, token })
+    pub fn eof(&self) -> bool {
+        self.tokens.eof()
+    }
+
+    fn unexpected_token<T>(&self, token: &Token<'a>, expect: Cow<'a, str>) -> ParseResult<'a, T> {
+        let actual = token.clone();
+        Err(LoxError::UnexpectedToken { expect, actual })
     }
 
     fn peek(&self) -> ParseResult<'a, &Token<'a>> {
         match self.tokens.peek() {
-            Some(Ok(ref token)) => Ok(token),
+            Some(Ok(ref token)) => {
+                tracing::debug!("peeked token: {token}");
+                Ok(token)
+            }
             Some(Err(e)) => Err(LoxError::from(*e)),
             None => Err(LoxError::UnexpectedEOF),
         }
@@ -90,7 +105,10 @@ impl<'a> Parser<'a> {
 
     fn next(&mut self) -> ParseResult<'a, Token<'a>> {
         match self.tokens.next() {
-            Some(Ok(token)) => Ok(token),
+            Some(Ok(token)) => {
+                tracing::debug!("next token: {token}");
+                Ok(token)
+            }
             Some(Err(e)) => Err(e.into()),
             None => Err(LoxError::UnexpectedEOF),
         }
@@ -103,9 +121,10 @@ impl<'a> Parser<'a> {
         match token {
             Ok(token) if token.kind == expected => {
                 let token = self.next()?;
+                tracing::info!("eat token `{token}`");
                 Ok(token)
             }
-            Ok(actual) => self.unexpected_token(actual, "expect matching tokenkind"),
+            Ok(actual) => self.unexpected_token(actual, Cow::Owned(format!("`{expected}`"))),
             Err(e) => Err(e),
         }
     }
@@ -116,6 +135,7 @@ impl<'a> Parser<'a> {
 }
 
 impl<'a> Parse<'a> for Literal<'a> {
+    #[tracing::instrument(name = "Parse<Literal>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
         let lit = match &token.kind {
@@ -127,39 +147,47 @@ impl<'a> Parse<'a> for Literal<'a> {
             TokenKind::True => Literal::True,
             TokenKind::False => Literal::False,
             TokenKind::Nil => Literal::Nil,
-            _ => return parser.unexpected_token(token, "expect a literal"),
+            _ => return parser.unexpected_token(token, "literal".into()),
         };
 
         parser.next()?;
+        tracing::info!("parsed literal `{lit}`");
         Ok(lit)
     }
 }
 
 impl<'a> Parse<'a> for Ident<'a> {
+    #[tracing::instrument(name = "Parse<Ident>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.next()?;
         match token.kind {
-            TokenKind::Ident(name) => Ok(Ident(name)),
-            _ => parser.unexpected_token(&token, "expect an identifier"),
+            TokenKind::Ident(name) => {
+                tracing::info!("parsed ident `{name}`");
+                Ok(Ident(name))
+            }
+            _ => parser.unexpected_token(&token, "an identifier".into()),
         }
     }
 }
 
 impl<'a> Parse<'a> for UnOp {
+    #[tracing::instrument(name = "Parse<UnOp>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
         let op = match token.kind {
             TokenKind::Minus => UnOp::Minus,
             TokenKind::Bang => UnOp::Not,
-            _ => return parser.unexpected_token(token, "expect unary operator"),
+            _ => return parser.unexpected_token(token, "unary operator".into()),
         };
 
         parser.next()?;
+        tracing::info!("parsed unary operator `{op}`");
         Ok(op)
     }
 }
 
 impl<'a> Parse<'a> for BinOp {
+    #[tracing::instrument(name = "Parse<BinOp>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         use TokenKind::*;
 
@@ -177,15 +205,17 @@ impl<'a> Parse<'a> for BinOp {
             Star => BinOp::Mul,
             And => BinOp::And,
             Or => BinOp::Or,
-            _ => return parser.unexpected_token(token, "expect binary operator"),
+            _ => return parser.unexpected_token(token, Cow::Borrowed("binary operator")),
         };
 
         parser.next()?;
+        tracing::info!("parsed binary operator `{op}`");
         Ok(op)
     }
 }
 
 impl<'a> Parse<'a> for Term<'a> {
+    #[tracing::instrument(name = "Parse<Term>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
         let term = match token.kind {
@@ -203,11 +233,13 @@ impl<'a> Parse<'a> for Term<'a> {
             }
         };
 
+        tracing::info!("parsed term `{term}`");
         Ok(term)
     }
 }
 
 impl<'a> Parse<'a> for Expr<'a> {
+    #[tracing::instrument(name = "Parse<Expr>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
         let span = token.span;
@@ -217,6 +249,22 @@ impl<'a> Parse<'a> for Expr<'a> {
                 let op = parser.parse()?;
                 let expr = parser.parse()?;
                 ExprKind::Unary(op, Box::new(expr))
+            }
+            TokenKind::Ident(_) => {
+                let ident = parser.parse()?;
+                if parser.eat(TokenKind::Eq).is_ok() {
+                    let expr = Box::new(parser.parse()?);
+                    let kind = ExprKind::Assign { name: ident, expr };
+
+                    let span = span.to(parser.current_span());
+                    let expr = Expr { kind, span };
+                    tracing::info!("parsed expr `{expr}`");
+
+                    return Ok(expr);
+                } else {
+                    tracing::debug!("parsing ident as a term");
+                    ExprKind::Term(Term::Ident(ident))
+                }
             }
             _ => {
                 let term = parser.parse()?;
@@ -231,42 +279,52 @@ impl<'a> Parse<'a> for Expr<'a> {
         if let Ok(op) = parser.parse() {
             // When encountering a high-priority operator, parse elements that do not contain the
             // operator or are indivisible in order to construct the parse tree.
-            if matches!(op, BinOp::Mul | BinOp::Div) {
-                let term_span = parser.peek()?.span;
-                let rhs = Expr {
-                    kind: ExprKind::Term(parser.parse()?),
-                    span: term_span.to(parser.current_span()),
-                };
+            match op {
+                BinOp::Mul | BinOp::Div => {
+                    let term_span = parser.peek()?.span;
+                    let rhs = Expr {
+                        kind: ExprKind::Term(parser.parse()?),
+                        span: term_span.to(parser.current_span()),
+                    };
 
-                let lhs = Expr {
-                    kind: ExprKind::Binary(op, Box::new(expr), Box::new(rhs)),
-                    span: span.to(parser.current_span()),
-                };
-
-                if let Ok(op) = parser.parse() {
-                    let rhs = parser.parse()?;
-
-                    Ok(Expr {
-                        kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
+                    let lhs = Expr {
+                        kind: ExprKind::Binary(op, Box::new(expr), Box::new(rhs)),
                         span: span.to(parser.current_span()),
-                    })
-                } else {
-                    Ok(lhs)
-                }
-            } else {
-                let rhs = parser.parse()?;
-                let kind = ExprKind::Binary(op, Box::new(expr), Box::new(rhs));
-                let span = span.to(parser.current_span());
+                    };
 
-                Ok(Expr { kind, span })
+                    if let Ok(op) = parser.parse() {
+                        let rhs = parser.parse()?;
+
+                        let expr = Expr {
+                            kind: ExprKind::Binary(op, Box::new(lhs), Box::new(rhs)),
+                            span: span.to(parser.current_span()),
+                        };
+                        tracing::info!("parsed expr `{expr}`");
+                        Ok(expr)
+                    } else {
+                        tracing::info!("parsed expr `{lhs}`");
+                        Ok(lhs)
+                    }
+                }
+                _ => {
+                    let rhs = parser.parse()?;
+                    let kind = ExprKind::Binary(op, Box::new(expr), Box::new(rhs));
+                    let span = span.to(parser.current_span());
+
+                    let expr = Expr { kind, span };
+                    tracing::info!("parsed expr `{expr}`");
+                    Ok(expr)
+                }
             }
         } else {
+            tracing::info!("parsed expr `{expr}`");
             Ok(expr)
         }
     }
 }
 
 impl<'a> Parse<'a> for Stmt<'a> {
+    #[tracing::instrument(name = "Parse<Stmt>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
         let token = parser.peek()?;
         let span = token.span;
@@ -289,14 +347,6 @@ impl<'a> Parse<'a> for Stmt<'a> {
 
                 StmtKind::DeclVar { name, initializer }
             }
-            // ident = expr ; (re-assignment)
-            TokenKind::Ident(_) => {
-                let name = parser.parse()?;
-                parser.eat(TokenKind::Eq)?;
-                let expr = Rc::new(parser.parse()?);
-
-                StmtKind::Assign { name, expr }
-            }
             TokenKind::LBrace => {
                 parser.eat(TokenKind::LBrace)?;
                 let mut stmts = Vec::new();
@@ -311,7 +361,9 @@ impl<'a> Parse<'a> for Stmt<'a> {
                 // block does not end with `;`
                 let span = span.to(parser.current_span());
                 let kind = StmtKind::Block(stmts);
-                return Ok(Stmt { kind, span });
+                let stmt = Stmt { kind, span };
+                tracing::info!("parsed statement `{stmt}`");
+                return Ok(stmt);
             }
             TokenKind::If => {
                 parser.eat(TokenKind::If)?;
@@ -327,14 +379,16 @@ impl<'a> Parse<'a> for Stmt<'a> {
                 };
                 let span = span.to(parser.current_span());
 
-                return Ok(Stmt {
+                let stmt = Stmt {
                     kind: StmtKind::If {
                         condition,
                         then_branch,
                         else_branch,
                     },
                     span,
-                });
+                };
+                tracing::info!("parsed statement `{stmt}`");
+                return Ok(stmt);
             }
             TokenKind::While => {
                 parser.eat(TokenKind::While)?;
@@ -344,10 +398,12 @@ impl<'a> Parse<'a> for Stmt<'a> {
 
                 let stmt = Rc::new(parser.parse()?);
 
-                return Ok(Stmt {
+                let stmt = Stmt {
                     kind: StmtKind::While { condition, stmt },
                     span: span.to(parser.current_span()),
-                });
+                };
+                tracing::info!("parsed statement `{stmt}`");
+                return Ok(stmt);
             }
             TokenKind::For => {
                 parser.eat(TokenKind::For)?;
@@ -359,10 +415,11 @@ impl<'a> Parse<'a> for Stmt<'a> {
                         ..
                     } => Rc::new(stmt),
                     stmt => {
+                        tracing::warn!("unexpected stmt kind in init section of for statement");
                         return Err(LoxError::SyntaxError {
                             message: Cow::Borrowed("unexpected statement"),
                             span: stmt.span,
-                        })
+                        });
                     }
                 };
                 let test = if parser.eat(TokenKind::Semicolon).is_ok() {
@@ -379,7 +436,7 @@ impl<'a> Parse<'a> for Stmt<'a> {
 
                 let body = Rc::new(parser.parse()?);
 
-                return Ok(Stmt {
+                let stmt = Stmt {
                     kind: StmtKind::For {
                         init,
                         test,
@@ -387,7 +444,9 @@ impl<'a> Parse<'a> for Stmt<'a> {
                         body,
                     },
                     span: span.to(parser.current_span()),
-                });
+                };
+                tracing::info!("parsed statement `{stmt}`");
+                return Ok(stmt);
             }
             _ => {
                 let expr = parser.parse::<Expr>()?;
@@ -397,9 +456,12 @@ impl<'a> Parse<'a> for Stmt<'a> {
         };
 
         parser.eat(TokenKind::Semicolon)?;
-        let span = span.to(parser.current_span());
 
-        Ok(Stmt { kind, span })
+        let span = span.to(parser.current_span());
+        let stmt = Stmt { kind, span };
+        tracing::info!("parsed statement `{stmt}`");
+
+        Ok(stmt)
     }
 }
 
@@ -505,6 +567,23 @@ mod tests {
                 ),
                 span: Span { base: 0, len: 6 },
             },
+        );
+    }
+
+    #[test]
+    fn parse_assignment_expr() {
+        assert_parse!(
+            "x = 10",
+            Expr {
+                kind: ExprKind::Assign {
+                    name: Ident("x"),
+                    expr: box Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                        ..
+                    }
+                },
+                ..
+            }
         );
     }
 
@@ -702,7 +781,10 @@ mod tests {
         assert_parse!(
             "x = 10;",
             Stmt {
-                kind: StmtKind::Assign { name: Ident("x"), expr },
+                kind: StmtKind::Expr(Expr {
+                    kind: ExprKind::Assign { name: Ident("x"), expr },
+                    ..
+                }),
                 ..
             } if *expr => Expr {
                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -715,7 +797,7 @@ mod tests {
     fn parse_block() {
         assert_parse!(
             "{}",
-            Stmt { kind: StmtKind::Block(block), .. } if block == vec![]
+            Stmt { kind: StmtKind::Block(block), .. } if block.is_empty()
         );
         assert_parse(
             "{ var x = 10; }",
@@ -843,25 +925,24 @@ mod tests {
 
     #[test]
     fn parse_while_stmt() {
-        assert_parse(
+        assert_parse!(
             "while (true) print 10;",
             Stmt {
                 kind: StmtKind::While {
                     condition: Expr {
                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-                        span: Span::new(7, 11),
+                        ..
                     },
-                    stmt: Box::new(Stmt {
-                        kind: StmtKind::Print(Expr {
-                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-                            span: Span::new(19, 21),
-                        }),
-                        span: Span::new(13, 22),
-                    })
-                    .into(),
+                    stmt,
                 },
-                span: Span::new(0, 22),
-            },
+            ..
+            } if *stmt => Stmt {
+                kind: StmtKind::Print(Expr {
+                    kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                    ..
+                }),
+                ..
+            }
         );
     }
 }
