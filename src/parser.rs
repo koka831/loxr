@@ -1,4 +1,4 @@
-use std::{iter::Peekable, rc::Rc};
+use std::{borrow::Cow, iter::Peekable, rc::Rc};
 
 use crate::{
     ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp},
@@ -349,6 +349,46 @@ impl<'a> Parse<'a> for Stmt<'a> {
                     span: span.to(parser.current_span()),
                 });
             }
+            TokenKind::For => {
+                parser.eat(TokenKind::For)?;
+                parser.eat(TokenKind::LParen)?;
+
+                let init = match parser.parse()? {
+                    stmt @ Stmt {
+                        kind: StmtKind::DeclVar { .. } | StmtKind::Expr(..),
+                        ..
+                    } => Rc::new(stmt),
+                    stmt => {
+                        return Err(LoxError::SyntaxError {
+                            message: Cow::Borrowed("unexpected statement"),
+                            span: stmt.span,
+                        })
+                    }
+                };
+                let test = if parser.eat(TokenKind::Semicolon).is_ok() {
+                    Some(Rc::new(parser.parse()?))
+                } else {
+                    None
+                };
+                let after = if parser.eat(TokenKind::Semicolon).is_ok() {
+                    Some(Rc::new(parser.parse()?))
+                } else {
+                    None
+                };
+                parser.eat(TokenKind::RParen)?;
+
+                let body = Rc::new(parser.parse()?);
+
+                return Ok(Stmt {
+                    kind: StmtKind::For {
+                        init,
+                        test,
+                        after,
+                        body,
+                    },
+                    span: span.to(parser.current_span()),
+                });
+            }
             _ => {
                 let expr = parser.parse::<Expr>()?;
 
@@ -363,443 +403,478 @@ impl<'a> Parse<'a> for Stmt<'a> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use std::fmt;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{assert_matches::assert_matches, fmt};
 
-//     fn assert_parse<'a, P>(source: &'a str, expect: P)
-//     where
-//         P: Parse<'a> + PartialEq + fmt::Debug,
-//     {
-//         let parsed = Parser::new(source).parse::<P>().unwrap();
-//         assert_eq!(parsed, expect);
-//     }
+    fn assert_parse<'a, P>(source: &'a str, expect: P)
+    where
+        P: Parse<'a> + PartialEq + fmt::Debug,
+    {
+        let parsed = Parser::new(source).parse::<P>().unwrap();
+        assert_eq!(parsed, expect);
+    }
 
-//     #[test]
-//     fn parse_literal() {
-//         assert_parse("12", Literal::Integer(12));
-//         assert_parse("12.3", Literal::Float(12.3));
-//         assert_parse(r#""string""#, Literal::String("string"));
-//         assert_parse("true", Literal::True);
-//         assert_parse("false", Literal::False);
-//         assert_parse("nil", Literal::Nil);
+    macro_rules! assert_parse {
+        ($source:literal, $expect:pat $(,)*) => {
+            let parsed = Parser::new($source).parse().unwrap();
+            assert_matches!(parsed, $expect);
+        };
+    }
 
-//         match Parser::new("null").parse::<Literal>().unwrap_err() {
-//             LoxError::UnexpectedToken { .. } => {}
-//             e => panic!("raises unexpected error: {e:?}"),
-//         }
-//     }
+    #[test]
+    fn parse_literal() {
+        assert_parse!("12", Literal::Integer(12));
+        assert_parse!("12.3", Literal::Float(..));
+        assert_parse!(r#""string""#, Literal::String("string"));
+        assert_parse!("true", Literal::True);
+        assert_parse!("false", Literal::False);
+        assert_parse!("nil", Literal::Nil);
 
-//     #[test]
-//     fn parse_literal_expr() {
-//         assert_parse(
-//             "12",
-//             Expr {
-//                 kind: ExprKind::Term(Term::Literal(Literal::Integer(12))),
-//                 span: Span::new(0, 2),
-//             },
-//         );
-//         assert_parse(
-//             "true",
-//             Expr {
-//                 kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                 span: Span::new(0, 4),
-//             },
-//         );
-//     }
+        match Parser::new("null").parse::<Literal>().unwrap_err() {
+            LoxError::UnexpectedToken { .. } => {}
+            e => panic!("raises unexpected error: {e:?}"),
+        }
+    }
 
-//     #[test]
-//     fn parse_unary_expr() {
-//         assert_parse(
-//             "!true",
-//             Expr {
-//                 kind: ExprKind::Unary(
-//                     UnOp::Not,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                         span: Span::new(1, 5),
-//                     }),
-//                 ),
-//                 span: Span::new(0, 5),
-//             },
-//         );
+    #[test]
+    fn parse_literal_expr() {
+        assert_parse!(
+            "12",
+            Expr {
+                kind: ExprKind::Term(Term::Literal(Literal::Integer(12))),
+                span: Span { base: 0, len: 2 },
+            },
+        );
+        assert_parse!(
+            "true",
+            Expr {
+                kind: ExprKind::Term(Term::Literal(Literal::True)),
+                span: Span { base: 0, len: 4 },
+            },
+        );
+    }
 
-//         assert_parse(
-//             "!!true",
-//             Expr {
-//                 kind: ExprKind::Unary(
-//                     UnOp::Not,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Unary(
-//                             UnOp::Not,
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                                 span: Span::new(2, 6),
-//                             }),
-//                         ),
-//                         span: Span::new(1, 6),
-//                     }),
-//                 ),
-//                 span: Span::new(0, 6),
-//             },
-//         );
-//     }
+    #[test]
+    fn parse_unary_expr() {
+        assert_parse!(
+            "!true",
+            Expr {
+                kind: ExprKind::Unary(
+                    UnOp::Not,
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span { base: 1, len: 4 },
+                    },
+                ),
+                span: Span { base: 0, len: 5 },
+            },
+        );
 
-//     #[test]
-//     fn parse_binary_expr() {
-//         use super::Literal::*;
+        assert_parse!(
+            "!!true",
+            Expr {
+                kind: ExprKind::Unary(
+                    UnOp::Not,
+                    box Expr {
+                        kind: ExprKind::Unary(
+                            UnOp::Not,
+                            box Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::True)),
+                                span: Span { base: 2, len: 4 },
+                            },
+                        ),
+                        span: Span { base: 1, len: 5 },
+                    },
+                ),
+                span: Span { base: 0, len: 6 },
+            },
+        );
+    }
 
-//         assert_parse(
-//             "42 == true",
-//             Expr {
-//                 kind: ExprKind::Binary(
-//                     BinOp::Eq,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Integer(42))),
-//                         span: Span::new(0, 2),
-//                     }),
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(True)),
-//                         span: Span::new(6, 10),
-//                     }),
-//                 ),
-//                 span: Span::new(0, 10),
-//             },
-//         );
+    #[test]
+    fn parse_binary_expr() {
+        use super::Literal::*;
 
-//         assert_parse(
-//             "true and true",
-//             Expr {
-//                 kind: ExprKind::Binary(
-//                     BinOp::And,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                         span: Span::new(0, 4),
-//                     }),
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                         span: Span::new(9, 13),
-//                     }),
-//                 ),
-//                 span: Span::new(0, 13),
-//             },
-//         );
+        assert_parse!(
+            "42 == true",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Eq,
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Integer(42))),
+                        span: Span { base: 0, len: 2 },
+                    },
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(True)),
+                        span: Span { base: 6, len: 4 },
+                    },
+                ),
+                span: Span { base: 0, len: 10 },
+            },
+        );
 
-//         assert_parse(
-//             "1 + 2 * 3",
-//             Expr {
-//                 kind: ExprKind::Binary(
-//                     BinOp::Plus,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Integer(1))),
-//                         span: Span { base: 0, len: 1 },
-//                     }),
-//                     Box::new(Expr {
-//                         kind: ExprKind::Binary(
-//                             BinOp::Mul,
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Integer(2))),
-//                                 span: Span { base: 4, len: 1 },
-//                             }),
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Integer(3))),
-//                                 span: Span { base: 8, len: 1 },
-//                             }),
-//                         ),
-//                         span: Span { base: 4, len: 5 },
-//                     }),
-//                 ),
-//                 span: Span { base: 0, len: 9 },
-//             },
-//         );
+        assert_parse!(
+            "true and true",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::And,
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        ..
+                    },
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        ..
+                    },
+                ),
+                ..
+            },
+        );
 
-//         assert_parse(
-//             "1 * 2 + 3",
-//             Expr {
-//                 kind: ExprKind::Binary(
-//                     BinOp::Plus,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Binary(
-//                             BinOp::Mul,
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Integer(1))),
-//                                 span: Span { base: 0, len: 1 },
-//                             }),
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Integer(2))),
-//                                 span: Span { base: 4, len: 1 },
-//                             }),
-//                         ),
-//                         span: Span { base: 0, len: 5 },
-//                     }),
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Integer(3))),
-//                         span: Span { base: 8, len: 1 },
-//                     }),
-//                 ),
-//                 span: Span { base: 0, len: 9 },
-//             },
-//         );
+        assert_parse!(
+            "1 + 2 * 3",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Plus,
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Integer(1))),
+                        ..
+                    },
+                    box Expr {
+                        kind: ExprKind::Binary(
+                            BinOp::Mul,
+                            box Expr {
+                                kind: ExprKind::Term(Term::Literal(Integer(2))),
+                                ..
+                            },
+                            box Expr {
+                                kind: ExprKind::Term(Term::Literal(Integer(3))),
+                                ..
+                            },
+                        ),
+                        ..
+                    },
+                ),
+                ..
+            },
+        );
 
-//         assert_parse(
-//             "(1 + 2) * 3",
-//             Expr {
-//                 kind: ExprKind::Binary(
-//                     BinOp::Mul,
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Grouped(Box::new(Expr {
-//                             kind: ExprKind::Binary(
-//                                 BinOp::Plus,
-//                                 Box::new(Expr {
-//                                     kind: ExprKind::Term(Term::Literal(Integer(1))),
-//                                     span: Span { base: 1, len: 1 },
-//                                 }),
-//                                 Box::new(Expr {
-//                                     kind: ExprKind::Term(Term::Literal(Integer(2))),
-//                                     span: Span { base: 5, len: 1 },
-//                                 }),
-//                             ),
-//                             span: Span { base: 1, len: 5 },
-//                         }))),
-//                         span: Span { base: 0, len: 7 },
-//                     }),
-//                     Box::new(Expr {
-//                         kind: ExprKind::Term(Term::Literal(Integer(3))),
-//                         span: Span { base: 10, len: 1 },
-//                     }),
-//                 ),
-//                 span: Span { base: 0, len: 11 },
-//             },
-//         );
-//     }
+        assert_parse!(
+            "1 * 2 + 3",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Plus,
+                    box Expr {
+                        kind: ExprKind::Binary(
+                            BinOp::Mul,
+                            box Expr {
+                                kind: ExprKind::Term(Term::Literal(Integer(1))),
+                                ..
+                            },
+                            box Expr {
+                                kind: ExprKind::Term(Term::Literal(Integer(2))),
+                                ..
+                            },
+                        ),
+                        ..
+                    },
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Integer(3))),
+                        ..
+                    },
+                ),
+                ..
+            },
+        );
 
-//     #[test]
-//     fn parse_stmt() {
-//         assert_parse(
-//             "1 + 2;",
-//             Stmt {
-//                 kind: StmtKind::Expr(Expr {
-//                     kind: ExprKind::Binary(
-//                         BinOp::Plus,
-//                         Box::new(Expr {
-//                             kind: ExprKind::Term(Term::Literal(Literal::Integer(1))),
-//                             span: Span::new(0, 1),
-//                         }),
-//                         Box::new(Expr {
-//                             kind: ExprKind::Term(Term::Literal(Literal::Integer(2))),
-//                             span: Span::new(4, 5),
-//                         }),
-//                     ),
-//                     span: Span::new(0, 5),
-//                 }),
-//                 span: Span::new(0, 6),
-//             },
-//         );
-//         assert_parse(
-//             r#"print "hi";"#,
-//             Stmt {
-//                 kind: StmtKind::Print(Expr {
-//                     kind: ExprKind::Term(Term::Literal(Literal::String("hi"))),
-//                     span: Span::new(6, 10),
-//                 }),
-//                 span: Span::new(0, 11),
-//             },
-//         );
-//         assert_parse(
-//             "print x;",
-//             Stmt {
-//                 kind: StmtKind::Print(Expr {
-//                     kind: ExprKind::Term(Term::Ident(Ident("x"))),
-//                     span: Span::new(6, 7),
-//                 }),
-//                 span: Span::new(0, 8),
-//             },
-//         );
-//     }
+        assert_parse!(
+            "(1 + 2) * 3",
+            Expr {
+                kind: ExprKind::Binary(
+                    BinOp::Mul,
+                    box Expr {
+                        kind: ExprKind::Term(Term::Grouped(box Expr {
+                            kind: ExprKind::Binary(
+                                BinOp::Plus,
+                                box Expr {
+                                    kind: ExprKind::Term(Term::Literal(Integer(1))),
+                                    ..
+                                },
+                                box Expr {
+                                    kind: ExprKind::Term(Term::Literal(Integer(2))),
+                                    ..
+                                },
+                            ),
+                            ..
+                        })),
+                        ..
+                    },
+                    box Expr {
+                        kind: ExprKind::Term(Term::Literal(Integer(3))),
+                        ..
+                    },
+                ),
+                span: Span { base: 0, len: 11 },
+            },
+        );
+    }
 
-//     #[test]
-//     fn parse_variable_decl() {
-//         assert_parse(
-//             "var x1_foobar;",
-//             Stmt {
-//                 kind: StmtKind::DeclVar {
-//                     name: Ident("x1_foobar"),
-//                     initializer: Expr::nil(),
-//                 },
-//                 span: Span::new(0, 14),
-//             },
-//         );
-//         assert_parse(
-//             "var x = 10;",
-//             Stmt {
-//                 kind: StmtKind::DeclVar {
-//                     name: Ident("x"),
-//                     initializer: Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                         span: Span::new(8, 10),
-//                     },
-//                 },
-//                 span: Span::new(0, 11),
-//             },
-//         );
-//         assert_parse(
-//             "x = 10;",
-//             Stmt {
-//                 kind: StmtKind::Assign {
-//                     name: Ident("x"),
-//                     expr: Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                         span: Span::new(4, 6),
-//                     },
-//                 },
-//                 span: Span::new(0, 7),
-//             },
-//         );
-//     }
+    #[test]
+    fn parse_stmt() {
+        assert_parse!(
+            "1 + 2;",
+            Stmt {
+                kind: StmtKind::Expr(Expr {
+                    kind: ExprKind::Binary(
+                        BinOp::Plus,
+                        box Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(1))),
+                            ..
+                        },
+                        box Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(2))),
+                            ..
+                        },
+                    ),
+                    ..
+                }),
+                ..
+            },
+        );
+        assert_parse!(
+            r#"print "hi";"#,
+            Stmt {
+                kind: StmtKind::Print(Expr {
+                    kind: ExprKind::Term(Term::Literal(Literal::String("hi"))),
+                    ..
+                }),
+                ..
+            },
+        );
+        assert_parse!(
+            "print x;",
+            Stmt {
+                kind: StmtKind::Print(Expr {
+                    kind: ExprKind::Term(Term::Ident(Ident("x"))),
+                    ..
+                }),
+                ..
+            },
+        );
+    }
 
-//     #[test]
-//     fn parse_block() {
-//         assert_parse(
-//             "{}",
-//             Stmt {
-//                 kind: StmtKind::Block(vec![]),
-//                 span: Span::new(0, 2),
-//             },
-//         );
-//         assert_parse(
-//             "{ var x = 10; }",
-//             Stmt {
-//                 kind: StmtKind::Block(vec![Stmt {
-//                     kind: StmtKind::DeclVar {
-//                         name: Ident("x"),
-//                         initializer: Expr {
-//                             kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                             span: Span::new(10, 12),
-//                         },
-//                     },
-//                     span: Span::new(2, 13),
-//                 }]),
-//                 span: Span::new(0, 15),
-//             },
-//         );
-//         assert_parse(
-//             "{ var x = 10; print x; }",
-//             Stmt {
-//                 kind: StmtKind::Block(vec![
-//                     Stmt {
-//                         kind: StmtKind::DeclVar {
-//                             name: Ident("x"),
-//                             initializer: Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                                 span: Span::new(10, 12),
-//                             },
-//                         },
-//                         span: Span::new(2, 13),
-//                     },
-//                     Stmt {
-//                         kind: StmtKind::Print(Expr {
-//                             kind: ExprKind::Term(Term::Ident(Ident("x"))),
-//                             span: Span::new(20, 21),
-//                         }),
-//                         span: Span::new(14, 22),
-//                     },
-//                 ]),
-//                 span: Span::new(0, 24),
-//             },
-//         );
-//     }
+    #[test]
+    fn parse_variable_decl() {
+        assert_parse(
+            "var x1_foobar;",
+            Stmt {
+                kind: StmtKind::DeclVar {
+                    name: Ident("x1_foobar"),
+                    // TODO: Rc matcher
+                    initializer: Rc::new(Expr::nil()),
+                    // initializer: Rc { .. }
+                },
+                span: Span::new(0, 14),
+            },
+        );
+        assert_parse(
+            "var x = 10;",
+            Stmt {
+                kind: StmtKind::DeclVar {
+                    name: Ident("x"),
+                    initializer: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                        span: Span::new(8, 10),
+                    }
+                    .into(),
+                },
+                span: Span::new(0, 11),
+            },
+        );
+        assert_parse(
+            "x = 10;",
+            Stmt {
+                kind: StmtKind::Assign {
+                    name: Ident("x"),
+                    expr: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                        span: Span::new(4, 6),
+                    }
+                    .into(),
+                },
+                span: Span::new(0, 7),
+            },
+        );
+    }
 
-//     #[test]
-//     fn parse_if_stmt() {
-//         assert_parse(
-//             "if(true) print 10;",
-//             Stmt {
-//                 kind: StmtKind::If {
-//                     condition: Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                         span: Span::new(3, 7),
-//                     },
-//                     then_branch: Box::new(Stmt {
-//                         kind: StmtKind::Print(Expr {
-//                             kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                             span: Span::new(15, 17),
-//                         }),
-//                         span: Span::new(9, 18),
-//                     }),
-//                     else_branch: None,
-//                 },
-//                 span: Span::new(0, 18),
-//             },
-//         );
-//         assert_parse(
-//             "if(10 != 42) {
-//                 print false;
-//             } else {
-//                 print true;
-//             }",
-//             Stmt {
-//                 kind: StmtKind::If {
-//                     condition: Expr {
-//                         kind: ExprKind::Binary(
-//                             BinOp::Neq,
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                                 span: Span { base: 3, len: 2 },
-//                             }),
-//                             Box::new(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Literal::Integer(42))),
-//                                 span: Span { base: 9, len: 2 },
-//                             }),
-//                         ),
-//                         span: Span { base: 3, len: 8 },
-//                     },
-//                     then_branch: Box::new(Stmt {
-//                         kind: StmtKind::Block(vec![Stmt {
-//                             kind: StmtKind::Print(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Literal::False)),
-//                                 span: Span { base: 37, len: 5 },
-//                             }),
-//                             span: Span { base: 31, len: 12 },
-//                         }]),
-//                         span: Span { base: 13, len: 44 },
-//                     }),
-//                     else_branch: Some(Box::new(Stmt {
-//                         kind: StmtKind::Block(vec![Stmt {
-//                             kind: StmtKind::Print(Expr {
-//                                 kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                                 span: Span { base: 87, len: 4 },
-//                             }),
-//                             span: Span { base: 81, len: 11 },
-//                         }]),
-//                         span: Span { base: 63, len: 43 },
-//                     })),
-//                 },
-//                 span: Span { base: 0, len: 106 },
-//             },
-//         );
-//     }
+    #[test]
+    fn parse_block() {
+        assert_parse(
+            "{}",
+            Stmt {
+                kind: StmtKind::Block(vec![]),
+                span: Span::new(0, 2),
+            },
+        );
+        assert_parse(
+            "{ var x = 10; }",
+            Stmt {
+                kind: StmtKind::Block(vec![Stmt {
+                    kind: StmtKind::DeclVar {
+                        name: Ident("x"),
+                        initializer: Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                            span: Span::new(10, 12),
+                        }
+                        .into(),
+                    },
+                    span: Span::new(2, 13),
+                }
+                .into()]),
+                span: Span::new(0, 15),
+            },
+        );
+        assert_parse(
+            "{ var x = 10; print x; }",
+            Stmt {
+                kind: StmtKind::Block(vec![
+                    Stmt {
+                        kind: StmtKind::DeclVar {
+                            name: Ident("x"),
+                            initializer: Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                                span: Span::new(10, 12),
+                            }
+                            .into(),
+                        },
+                        span: Span::new(2, 13),
+                    }
+                    .into(),
+                    Stmt {
+                        kind: StmtKind::Print(Expr {
+                            kind: ExprKind::Term(Term::Ident(Ident("x"))),
+                            span: Span::new(20, 21),
+                        }),
+                        span: Span::new(14, 22),
+                    }
+                    .into(),
+                ]),
+                span: Span::new(0, 24),
+            },
+        );
+    }
 
-//     #[test]
-//     fn parse_while_stmt() {
-//         assert_parse(
-//             "while (true) print 10;",
-//             Stmt {
-//                 kind: StmtKind::While {
-//                     condition: Expr {
-//                         kind: ExprKind::Term(Term::Literal(Literal::True)),
-//                         span: Span::new(7, 11),
-//                     },
-//                     stmt: Box::new(Stmt {
-//                         kind: StmtKind::Print(Expr {
-//                             kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
-//                             span: Span::new(19, 21),
-//                         }),
-//                         span: Span::new(13, 22),
-//                     }),
-//                 },
-//                 span: Span::new(0, 22),
-//             },
-//         );
-//     }
-// }
+    #[test]
+    fn parse_if_stmt() {
+        assert_parse(
+            "if(true) print 10;",
+            Stmt {
+                kind: StmtKind::If {
+                    condition: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span::new(3, 7),
+                    },
+                    then_branch: Box::new(Stmt {
+                        kind: StmtKind::Print(Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                            span: Span::new(15, 17),
+                        }),
+                        span: Span::new(9, 18),
+                    })
+                    .into(),
+                    else_branch: None,
+                },
+                span: Span::new(0, 18),
+            },
+        );
+        assert_parse(
+            "if(10 != 42) {
+                print false;
+            } else {
+                print true;
+            }",
+            Stmt {
+                kind: StmtKind::If {
+                    condition: Expr {
+                        kind: ExprKind::Binary(
+                            BinOp::Neq,
+                            Box::new(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                                span: Span { base: 3, len: 2 },
+                            }),
+                            Box::new(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::Integer(42))),
+                                span: Span { base: 9, len: 2 },
+                            }),
+                        ),
+                        span: Span { base: 3, len: 8 },
+                    },
+                    then_branch: Box::new(Stmt {
+                        kind: StmtKind::Block(vec![Stmt {
+                            kind: StmtKind::Print(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::False)),
+                                span: Span { base: 37, len: 5 },
+                            }),
+                            span: Span { base: 31, len: 12 },
+                        }
+                        .into()]),
+                        span: Span { base: 13, len: 44 },
+                    })
+                    .into(),
+                    else_branch: Some(
+                        Box::new(Stmt {
+                            kind: StmtKind::Block(vec![Stmt {
+                                kind: StmtKind::Print(Expr {
+                                    kind: ExprKind::Term(Term::Literal(Literal::True)),
+                                    span: Span { base: 87, len: 4 },
+                                }),
+                                span: Span { base: 81, len: 11 },
+                            }
+                            .into()]),
+                            span: Span { base: 63, len: 43 },
+                        })
+                        .into(),
+                    ),
+                },
+                span: Span { base: 0, len: 106 },
+            },
+        );
+    }
+
+    #[test]
+    fn parse_while_stmt() {
+        assert_parse(
+            "while (true) print 10;",
+            Stmt {
+                kind: StmtKind::While {
+                    condition: Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::True)),
+                        span: Span::new(7, 11),
+                    },
+                    stmt: Box::new(Stmt {
+                        kind: StmtKind::Print(Expr {
+                            kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
+                            span: Span::new(19, 21),
+                        }),
+                        span: Span::new(13, 22),
+                    })
+                    .into(),
+                },
+                span: Span::new(0, 22),
+            },
+        );
+    }
+
+    #[test]
+    fn parse_for_stmt() {
+        assert_parse!(
+            "for (var x = 0; x < 5; x = x + 1) { print x; }",
+            Stmt {
+                kind: StmtKind::For { .. },
+                ..
+            }
+        );
+    }
+}

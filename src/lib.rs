@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 #![feature(box_patterns)]
 #![feature(let_chains)]
+#![feature(assert_matches)]
 
 use std::{
     io::{self, BufWriter},
