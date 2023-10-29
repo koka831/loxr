@@ -10,9 +10,10 @@ use std::{
 
 use error::LoxError;
 
-use crate::interpreter::Interpreter;
+use crate::{diagnosis::DiagnosticReporter, interpreter::Interpreter};
 
 pub mod ast;
+pub mod diagnosis;
 pub mod error;
 pub mod interpreter;
 pub mod lexer;
@@ -53,9 +54,9 @@ pub fn exec_file<'s, P: AsRef<Path> + 's>(path: P) -> Result<(), LoxError<'s>> {
     let content = std::fs::read_to_string(path).unwrap();
 
     let mut out = BufWriter::new(io::stdout());
-    match Interpreter::new(&mut out).execute(&content) {
-        Ok(_) => {}
-        Err(e) => eprintln!("{e}"),
+    if let Err(e) = Interpreter::new(&mut out).execute(&content) {
+        let mut stderr = BufWriter::new(io::stderr().lock());
+        DiagnosticReporter::new(&mut stderr).report(&e, &content);
     }
 
     Ok(())
