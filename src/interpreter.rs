@@ -216,6 +216,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
 
                 self.env.exit_scope()?;
             }
+            _ => unimplemented!()
         }
 
         Ok(())
@@ -336,6 +337,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
 
                 Ok(value.clone())
             }
+            _ => unimplemented!(),
         }
     }
 
@@ -437,5 +439,10 @@ mod tests {
     #[test]
     fn interpret_while_stmt() {
         assert_stmt("var x = 3; while(x > 0) { x = x - 1; print x; }", "2\n1\n0");
+    }
+
+    #[test]
+    fn interpret_for_stmt() {
+        assert_stmt("for (var i = 0; i < 5; i = i + 1) { print i; }", "0\n1\n2\n3\n4");
     }
 }
