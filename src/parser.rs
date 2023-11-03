@@ -1,7 +1,7 @@
 use std::{borrow::Cow, iter::Peekable, rc::Rc};
 
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp},
+    ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp},
     error::{LexError, LoxError},
     lexer::Lexer,
     span::Span,
@@ -14,10 +14,7 @@ pub fn parse(source: &str) -> Result<Vec<Stmt<'_>>, LoxError<'_>> {
     let mut parser = Parser::new(source);
     let mut stmts = Vec::new();
     while !parser.eof() {
-        let stmt = match parser.parse() {
-            Ok(stmt) => stmt,
-            Err(e) => return Err(e),
-        };
+        let stmt = parser.parse()?;
         stmts.push(stmt);
     }
 
@@ -226,7 +223,25 @@ impl<'a> Parse<'a> for Term<'a> {
 
                 Term::Grouped(Box::new(expr))
             }
-            TokenKind::Ident(_) => Term::Ident(parser.parse()?),
+            TokenKind::Ident(_) => {
+                let ident = parser.parse()?;
+                if parser.eat(TokenKind::LParen).is_ok() {
+                    let mut arguments = Vec::new();
+                    while parser.eat(TokenKind::RParen).is_err() {
+                        let argument = parser.parse()?;
+                        arguments.push(argument);
+
+                        if parser.eat(TokenKind::Comma).is_ok() {}
+                    }
+
+                    Term::FnCall {
+                        callee: ident,
+                        arguments,
+                    }
+                } else {
+                    Term::Ident(ident)
+                }
+            }
             _ => {
                 let literal = parser.parse()?;
                 Term::Literal(literal)
@@ -250,11 +265,11 @@ impl<'a> Parse<'a> for Expr<'a> {
                 let expr = parser.parse()?;
                 ExprKind::Unary(op, Box::new(expr))
             }
-            TokenKind::Ident(_) => {
-                let ident = parser.parse()?;
-                if parser.eat(TokenKind::Eq).is_ok() {
+            _ => {
+                let term = parser.parse()?;
+                if let Term::Ident(ref ident) = term && parser.eat(TokenKind::Eq).is_ok() {
                     let expr = Box::new(parser.parse()?);
-                    let kind = ExprKind::Assign { name: ident, expr };
+                    let kind = ExprKind::Assign { name: ident.clone(), expr };
 
                     let span = span.to(parser.current_span());
                     let expr = Expr { kind, span };
@@ -262,13 +277,8 @@ impl<'a> Parse<'a> for Expr<'a> {
 
                     return Ok(expr);
                 } else {
-                    tracing::debug!("parsing ident as a term");
-                    ExprKind::Term(Term::Ident(ident))
+                    ExprKind::Term(term)
                 }
-            }
-            _ => {
-                let term = parser.parse()?;
-                ExprKind::Term(term)
             }
         };
 
@@ -346,6 +356,41 @@ impl<'a> Parse<'a> for Stmt<'a> {
                 };
 
                 StmtKind::DeclVar { name, initializer }
+            }
+            TokenKind::Fun => {
+                parser.eat(TokenKind::Fun)?;
+                let name = parser.parse()?;
+                // parse parameters
+                parser.eat(TokenKind::LParen)?;
+                let mut params = Vec::new();
+                while parser.eat(TokenKind::RParen).is_err() {
+                    let param = parser.parse()?;
+                    params.push(param);
+
+                    if parser.eat(TokenKind::Comma).is_ok() {}
+                }
+
+                // parse body
+                let body = match parser.parse()? {
+                    Stmt {
+                        kind: StmtKind::Block(block),
+                        ..
+                    } => block,
+                    stmt => {
+                        let message =
+                            Cow::Owned(format!("function body must be a block: `{stmt}`"));
+                        let span = stmt.span;
+                        return Err(LoxError::SyntaxError { message, span });
+                    }
+                };
+
+                let stmt = Stmt {
+                    kind: StmtKind::DefFun(Fn { name, params, body }),
+                    span: span.to(parser.current_span()),
+                };
+
+                tracing::info!("parsed statement `{stmt}`");
+                return Ok(stmt);
             }
             TokenKind::LBrace => {
                 parser.eat(TokenKind::LBrace)?;
@@ -504,6 +549,15 @@ mod tests {
         };
     }
 
+    macro_rules! assert_parse_err {
+        ($source:literal, $ty:ty, $expect:pat) => {
+            match Parser::new($source).parse::<$ty>().unwrap_err() {
+                $expect => {}
+                e => panic!("raises unexpected error: {e:?}"),
+            }
+        };
+    }
+
     #[test]
     fn parse_literal() {
         assert_parse!("12", Literal::Integer(12));
@@ -513,14 +567,43 @@ mod tests {
         assert_parse!("false", Literal::False);
         assert_parse!("nil", Literal::Nil);
 
-        match Parser::new("null").parse::<Literal>().unwrap_err() {
-            LoxError::UnexpectedToken { .. } => {}
-            e => panic!("raises unexpected error: {e:?}"),
-        }
+        assert_parse_err!("null", Literal, LoxError::UnexpectedToken { .. });
     }
 
     #[test]
-    fn parse_literal_expr() {
+    fn parse_fncall_term() {
+        assert_parse!(
+            "fn()",
+            Term::FnCall {
+                callee: Ident("fn"),
+                arguments
+            } if arguments == vec![]
+        );
+        assert_parse!(
+            "add(1, 2)",
+            Term::FnCall {
+                callee: Ident("add"),
+                arguments,
+            } if arguments == vec![
+                Expr {
+                    kind: ExprKind::Term(Term::Literal(Literal::Integer(1))),
+                    span: Span { base: 4, len: 1 },
+                },
+                Expr {
+                    kind: ExprKind::Term(Term::Literal(Literal::Integer(2))),
+                    span: Span { base: 7, len: 1 },
+                }
+            ]
+        );
+        assert_parse!("x(a,)", Term::FnCall { .. });
+        assert_parse!("x()()", Term::FnCall { .. });
+
+        assert_parse_err!("x(,)", Term, LoxError::UnexpectedToken { .. });
+        assert_parse_err!("x(a,,)", Term, LoxError::UnexpectedToken { .. });
+    }
+
+    #[test]
+    fn parse_term_expr() {
         assert_parse!(
             "12",
             Expr {
@@ -534,6 +617,13 @@ mod tests {
                 kind: ExprKind::Term(Term::Literal(Literal::True)),
                 span: Span { base: 0, len: 4 },
             },
+        );
+        assert_parse!(
+            "x()",
+            Expr {
+                kind: ExprKind::Term(Term::FnCall { .. }),
+                ..
+            }
         );
     }
 
@@ -947,6 +1037,37 @@ mod tests {
                 }),
                 ..
             }
+        );
+    }
+
+    #[test]
+    fn parse_deffun_stmt() {
+        assert_parse!(
+            "fun x(){}",
+            Stmt {
+                kind: StmtKind::DefFun(Fn {
+                    name: Ident("x"),
+                    params,
+                    ..
+                }),
+                ..
+            } if params.is_empty()
+        );
+        assert_parse!(
+            "fun add(a, b) { print a + b; }",
+            Stmt {
+                kind: StmtKind::DefFun(Fn {
+                    name: Ident("add"),
+                    params,
+                    ..
+                }),
+                ..
+            } if params == vec![Ident("a"), Ident("b")]
+        );
+        assert_parse_err!(
+            "fun add(a, b) print a + b;",
+            Stmt,
+            LoxError::SyntaxError { .. }
         );
     }
 }

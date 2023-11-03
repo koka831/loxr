@@ -6,8 +6,10 @@
 //!
 //! ## Expressions:
 //!
-//! expr        -> unary | binary | grouped | literal ;
+//! expr        -> unary | binary | term | assignment ;
+//! term        -> grouped | ident | literal | call ;
 //! unary       -> ( "-" | "!" ) expr ;
+//! call        -> term "(" ( expr ( "," expr )* )? ")" ;
 //! binary      -> expr (
 //!                  "!=" | "==" | ">" | ">=" | "<" | "<=" | "-" | "+" | "/" | "*" | "and" | "or"
 //!                ) expr ;
@@ -21,6 +23,7 @@
 //!
 //! statement   -> expression ";" ;
 //!             | "print" expression ";" ;
+//!             | "fun" ident "(" ( ident ( "," ident )* )? ")" block stmt ;
 //!             | "var" ident "=" expression ";" ;
 //!             | "{" statement* "}" ;
 //!             | "if" "(" ")" statement ( "else" statement )? ;
@@ -100,6 +103,10 @@ pub enum Term<'s> {
     Grouped(Box<Expr<'s>>),
     Literal(Literal<'s>),
     Ident(Ident<'s>),
+    FnCall {
+        callee: Ident<'s>,
+        arguments: Vec<Expr<'s>>,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -132,6 +139,13 @@ impl<'s> Expr<'s> {
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Ident<'s>(pub &'s str);
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct Fn<'a> {
+    pub name: Ident<'a>,
+    pub params: Vec<Ident<'a>>,
+    pub body: Vec<Rc<Stmt<'a>>>,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum StmtKind<'s> {
     /// expression ;
@@ -139,6 +153,9 @@ pub enum StmtKind<'s> {
     Expr(Expr<'s>),
     /// print expression ;
     Print(Expr<'s>),
+    /// function declaration
+    /// fun ident ( params ) { stmt }
+    DefFun(Fn<'s>),
     /// variable declaration
     /// var ident ( = expr )? ;
     DeclVar {
@@ -229,12 +246,32 @@ impl<'s> fmt::Display for Ident<'s> {
     }
 }
 
+impl<'s> fmt::Display for Fn<'s> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let params = self
+            .params
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        write!(f, "fun {}({params}) {{ .. }}", self.name)
+    }
+}
+
 impl<'s> fmt::Display for Term<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Term::Grouped(box expr) => write!(f, "({expr})"),
             Term::Literal(lit) => lit.fmt(f),
             Term::Ident(ident) => ident.fmt(f),
+            Term::FnCall { callee, arguments } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{callee}({arguments})")
+            }
         }
     }
 }
@@ -261,6 +298,7 @@ impl<'s> fmt::Display for Stmt<'s> {
         match &self.kind {
             StmtKind::Expr(expr) => expr.fmt(f),
             StmtKind::Print(expr) => write!(f, "print {expr}"),
+            StmtKind::DefFun(fun) => fun.fmt(f),
             StmtKind::DeclVar { name, initializer } => write!(f, "var {name} = {initializer}"),
             StmtKind::Block(block) => write!(f, "{{ {} lines }}", block.len()),
             StmtKind::If {

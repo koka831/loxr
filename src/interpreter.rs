@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp},
+    ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp},
     error::LoxError,
     parser,
     span::Span,
@@ -19,11 +19,14 @@ pub struct Environment<'scope> {
 /// represents runtime value
 pub enum Rt<'s> {
     Literal(Literal<'s>),
+    // function ptr
+    Fn(Rc<Fn<'s>>),
 }
 impl<'s> Rt<'s> {
     pub fn truthy(&self) -> bool {
         match self {
             Rt::Literal(l) => l.truthy(),
+            Rt::Fn(..) => false,
         }
     }
 }
@@ -31,6 +34,7 @@ impl<'s> fmt::Display for Rt<'s> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Rt::Literal(l) => l.fmt(f),
+            Rt::Fn(fun) => fun.fmt(f),
         }
     }
 }
@@ -136,7 +140,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
             if let Err(e) = self.stmt(stmt) {
                 writeln!(self.writer, "{e}").unwrap();
                 self.writer.flush().unwrap();
-                return Err(LoxError::Other(anyhow!("runtime error")));
+                return Err(e);
             }
         }
 
@@ -158,6 +162,10 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
             StmtKind::DeclVar { name, initializer } => {
                 let evaluated = self.expr(initializer)?;
                 self.env.define(name.clone(), evaluated)
+            }
+            StmtKind::DefFun(fun) => {
+                self.env
+                    .define(fun.name.clone(), Rt::Fn(Rc::new(fun.clone())));
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
@@ -216,7 +224,6 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
 
                 self.env.exit_scope()?;
             }
-            _ => unimplemented!()
         }
 
         Ok(())
@@ -330,14 +337,36 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
             Term::Ident(ident) => {
                 let Some(value) = self.env.lookup(ident) else {
                     // TODO: give a span
-                    return Err(
-                        self.error(format!("undefined identifier `{ident}`"), Span::new(0, 0))
-                    );
+                    let message = format!("undefined identifier `{ident}`");
+                    return Err(self.error(message, Span::new(0, 0)));
                 };
 
                 Ok(value.clone())
             }
-            _ => unimplemented!(),
+            Term::FnCall { callee, arguments } => {
+                let Some(Rt::Fn(func)) = self.env.lookup(callee) else {
+                    let message = format!("undefined function `{callee}`");
+                    return Err(self.error(message, Span::new(0, 0)));
+                };
+
+                let param_len = func.params.len();
+                let arg_len = arguments.len();
+                if param_len != arg_len {
+                    let message = format!("arity mismatch: expect {param_len}, given {arg_len}");
+                    return Err(self.error(message, Span::new(0, 0)));
+                }
+
+                // todo avoid clone
+                let params = func.params.clone();
+                self.env.nest_scope()?;
+                for i in 0..param_len {
+                    let expr = self.expr(&arguments[i])?;
+                    self.env.define(params[i].clone(), expr);
+                }
+                self.env.exit_scope()?;
+
+                Ok(Rt::Literal(Literal::Nil))
+            }
         }
     }
 
@@ -368,11 +397,31 @@ mod tests {
         assert_eq!(reducted, Rt::Literal(expected))
     }
 
-    fn assert_stmt(program: &str, expected: &str) {
-        let mut stdout = BufWriter::new(Vec::new());
-        Interpreter::new(&mut stdout).execute(program).unwrap();
-        let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
-        assert_eq!(output.trim(), expected.to_string());
+    macro_rules! assert_interpret {
+        ($program:literal, $expected:literal $(,)*) => {
+            let mut stdout = BufWriter::new(Vec::new());
+            Interpreter::new(&mut stdout).execute($program).unwrap();
+            let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
+            assert_eq!(output.trim(), $expected.to_string());
+        };
+    }
+
+    macro_rules! assert_interpret_err {
+        // use `$cond` to compare an inner value of `Cow`
+        ($program:literal, $expected:pat if $cond:expr) => {
+            let mut stdout = BufWriter::new(Vec::new());
+            match Interpreter::new(&mut stdout).execute($program).unwrap_err() {
+                $expected if $cond => {}
+                e => panic!("unexpected error {e:?}"),
+            }
+        };
+        ($program:literal, $expected:expr $(,)*) => {
+            let mut stdout = BufWriter::new(Vec::new());
+            match Interpreter::new(&mut stdout).execute($program).unwrap_err() {
+                $expected => {}
+                e => panic!("unexpected error {e:?}"),
+            }
+        };
     }
 
     #[test]
@@ -401,16 +450,16 @@ mod tests {
 
     #[test]
     fn interpret() {
-        assert_stmt("1 + 2;", "");
-        assert_stmt("print 1 + 2;", "3");
-        assert_stmt(r#"print "1 + 2";"#, "1 + 2");
-        assert_stmt(r#"print "Hello, " + "World";"#, "Hello, World");
-        assert_stmt("var x = 10; print x;", "10");
+        assert_interpret!("1 + 2;", "");
+        assert_interpret!("print 1 + 2;", "3");
+        assert_interpret!(r#"print "1 + 2";"#, "1 + 2");
+        assert_interpret!(r#"print "Hello, " + "World";"#, "Hello, World");
+        assert_interpret!("var x = 10; print x;", "10");
     }
 
     #[test]
     fn interpret_block() {
-        assert_stmt(
+        assert_interpret!(
             r#"
             var x = 10;
             {
@@ -432,17 +481,32 @@ mod tests {
 
     #[test]
     fn interpret_if_stmt() {
-        assert_stmt(r#"if(true) { print 10; } else { print 0; }"#, "10");
-        assert_stmt(r#"if(false) { print 10; } else { print 0; }"#, "0");
+        assert_interpret!(r#"if(true) { print 10; } else { print 0; }"#, "10");
+        assert_interpret!(r#"if(false) { print 10; } else { print 0; }"#, "0");
     }
 
     #[test]
     fn interpret_while_stmt() {
-        assert_stmt("var x = 3; while(x > 0) { x = x - 1; print x; }", "2\n1\n0");
+        assert_interpret!("var x = 3; while(x > 0) { x = x - 1; print x; }", "2\n1\n0");
     }
 
     #[test]
     fn interpret_for_stmt() {
-        assert_stmt("for (var i = 0; i < 5; i = i + 1) { print i; }", "0\n1\n2\n3\n4");
+        assert_interpret!(
+            "for (var i = 0; i < 5; i = i + 1) { print i; }",
+            "0\n1\n2\n3\n4",
+        );
+    }
+
+    #[test]
+    fn interpret_fn_call() {
+        assert_interpret_err!(
+            r#"a();"#,
+            LoxError::SyntaxError { message, .. } if message == "undefined function `a`"
+        );
+        assert_interpret_err!(
+            "fun foo(a, b) { print a + b; } foo(1, 2, 3);",
+            LoxError::SyntaxError { message, .. } if message == "arity mismatch: expect 2, given 3"
+        );
     }
 }
