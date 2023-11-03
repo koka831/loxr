@@ -358,10 +358,15 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
 
                 // todo avoid clone
                 let params = func.params.clone();
+                let body = func.body.clone();
+
                 self.env.nest_scope()?;
                 for i in 0..param_len {
                     let expr = self.expr(&arguments[i])?;
                     self.env.define(params[i].clone(), expr);
+                }
+                for stmt in &body {
+                    self.stmt(Rc::clone(stmt))?;
                 }
                 self.env.exit_scope()?;
 
