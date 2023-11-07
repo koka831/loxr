@@ -497,6 +497,24 @@ impl<'a> Parse<'a> for Stmt<'a> {
                 tracing::info!("parsed statement `{stmt}`");
                 return Ok(stmt);
             }
+            TokenKind::Return => {
+                parser.eat(TokenKind::Return)?;
+                let expr = if parser.eat(TokenKind::Semicolon).is_ok() {
+                    None
+                } else {
+                    let expr = Rc::new(parser.parse()?);
+                    parser.eat(TokenKind::Semicolon)?;
+
+                    Some(expr)
+                };
+
+                let kind = StmtKind::Return(expr);
+                let span = span.to(parser.current_span());
+                let stmt = Stmt { kind, span };
+                tracing::info!("parsed statement `{stmt}`");
+
+                return Ok(stmt);
+            }
             _ => {
                 let expr = parser.parse::<Expr>()?;
 
@@ -1068,6 +1086,32 @@ mod tests {
             "fun add(a, b) print a + b;",
             Stmt,
             LoxError::SyntaxError { .. }
+        );
+    }
+
+    #[test]
+    fn parse_return_stmt() {
+        assert_parse!(
+            "return;",
+            Stmt {
+                kind: StmtKind::Return(None),
+                ..
+            }
+        );
+
+        assert_parse!(
+            "return 42;",
+            Stmt {
+                kind: StmtKind::Return(expr),
+                ..
+            } if expr == Some(
+                Rc::new(
+                    Expr {
+                        kind: ExprKind::Term(Term::Literal(Literal::Integer(42))),
+                        span: Span::new(7, 9),
+                    },
+                )
+            )
         );
     }
 }

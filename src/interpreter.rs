@@ -121,6 +121,7 @@ impl<'s> SymbolTable<'s> {
 pub struct Interpreter<'a, 's: 'a, W: io::Write> {
     writer: &'s mut W,
     env: Environment<'a>,
+    // TODO: hold current cursor (span)
 }
 
 impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
@@ -223,6 +224,9 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 }
 
                 self.env.exit_scope()?;
+            }
+            StmtKind::Return(expr) => {
+                todo!()
             }
         }
 

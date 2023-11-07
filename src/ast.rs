@@ -29,6 +29,7 @@
 //!             | "if" "(" ")" statement ( "else" statement )? ;
 //!             | "while" "(" expression ")" statement ;
 //!             | "for" "(" (DeclVar | expr stmt | ";") expression? ";" expression? ")" statement ;
+//!             | "return" expression? ";" ;
 use std::{fmt, rc::Rc};
 
 use crate::span::Span;
@@ -181,6 +182,8 @@ pub enum StmtKind<'s> {
         after: Option<Rc<Expr<'s>>>,
         body: Rc<Stmt<'s>>,
     },
+    /// return expr? ;
+    Return(Option<Rc<Expr<'s>>>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -326,6 +329,10 @@ impl<'s> fmt::Display for Stmt<'s> {
                 write!(f, ")")?;
                 write!(f, "{body}")
             }
+            StmtKind::Return(expr) => match expr {
+                Some(expr) => write!(f, "return {expr}"),
+                None => write!(f, "return"),
+            },
         }
     }
 }
