@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{span::Span, token::Token};
+use crate::{interpreter::Rt, span::Span, token::Token};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -25,6 +25,9 @@ pub enum LoxError<'a> {
 
     #[error(transparent)]
     Other(anyhow::Error),
+
+    #[error("internal use")]
+    _Return(Rt<'a>),
 }
 
 #[derive(Debug, Copy, Clone, Error)]

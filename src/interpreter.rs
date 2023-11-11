@@ -21,12 +21,14 @@ pub enum Rt<'s> {
     Literal(Literal<'s>),
     // function ptr
     Fn(Rc<Fn<'s>>),
+    Void,
 }
 impl<'s> Rt<'s> {
     pub fn truthy(&self) -> bool {
         match self {
             Rt::Literal(l) => l.truthy(),
             Rt::Fn(..) => false,
+            Rt::Void => false,
         }
     }
 }
@@ -35,6 +37,7 @@ impl<'s> fmt::Display for Rt<'s> {
         match self {
             Rt::Literal(l) => l.fmt(f),
             Rt::Fn(fun) => fun.fmt(f),
+            Rt::Void => write!(f, "void"),
         }
     }
 }
@@ -226,7 +229,11 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 self.env.exit_scope()?;
             }
             StmtKind::Return(expr) => {
-                todo!()
+                let rt = match expr {
+                    Some(expr) => self.expr(expr)?,
+                    None => Rt::Void,
+                };
+                return Err(LoxError::_Return(rt));
             }
         }
 
@@ -370,7 +377,9 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     self.env.define(params[i].clone(), expr);
                 }
                 for stmt in &body {
-                    self.stmt(Rc::clone(stmt))?;
+                    if let Err(LoxError::_Return(rt)) = self.stmt(Rc::clone(stmt)) {
+                        return Ok(rt);
+                    }
                 }
                 self.env.exit_scope()?;
 
