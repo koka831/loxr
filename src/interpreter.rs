@@ -233,6 +233,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                     Some(expr) => self.expr(expr)?,
                     None => Rt::Void,
                 };
+                // HACK: use Result::Err to exit and return value
                 return Err(LoxError::_Return(rt));
             }
         }
@@ -374,10 +375,13 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                 self.env.nest_scope()?;
                 for i in 0..param_len {
                     let expr = self.expr(&arguments[i])?;
+                    tracing::info!("argument[{i}] = {expr}");
                     self.env.define(params[i].clone(), expr);
                 }
                 for stmt in &body {
                     if let Err(LoxError::_Return(rt)) = self.stmt(Rc::clone(stmt)) {
+                        tracing::info!("return {callee} with {rt}");
+                        self.env.exit_scope()?;
                         return Ok(rt);
                     }
                 }
