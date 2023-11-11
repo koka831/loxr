@@ -522,6 +522,24 @@ mod tests {
 
     #[test]
     fn interpret_fn_call() {
+        assert_interpret!(
+            r#"
+fun add(a, b) { return a + b; }
+print add(1, 2);"#,
+            "3",
+        );
+        assert_interpret!(
+            r#"
+fun fib(n) {
+  if (n <= 1) return n;
+  return fib(n - 2) + fib(n - 1);
+}
+
+for (var i = 0; i < 10; i = i + 1) {
+  print fib(i);
+}"#,
+            "0\n1\n1\n2\n3\n5\n8\n13\n21\n34"
+        );
         assert_interpret_err!(
             r#"a();"#,
             LoxError::SyntaxError { message, .. } if message == "undefined function `a`"
