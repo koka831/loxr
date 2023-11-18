@@ -10,8 +10,8 @@ use crate::{
 
 type ParseResult<T> = std::result::Result<T, LoxError>;
 
-pub fn parse(source: String) -> Result<Vec<Stmt>, LoxError> {
-    let mut parser = Parser::new(&source);
+pub fn parse(source: &str) -> Result<Vec<Stmt>, LoxError> {
+    let mut parser = Parser::new(source);
     let mut stmts = Vec::new();
     while !parser.eof() {
         let stmt = parser.parse()?;

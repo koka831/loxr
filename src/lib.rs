@@ -30,7 +30,7 @@ pub fn prompt() -> Result<(), LoxError> {
     loop {
         match rl.readline(">> ") {
             Ok(line) => {
-                if let Err(e) = interpreter.execute(line) {
+                if let Err(e) = interpreter.execute(&line) {
                     eprintln!("{e}");
                 }
             }
@@ -49,7 +49,7 @@ pub fn exec_file<P: AsRef<Path>>(path: P) -> Result<(), LoxError> {
     let content = std::fs::read_to_string(path).unwrap();
 
     let mut out = BufWriter::new(io::stdout());
-    if let Err(e) = Interpreter::new(&mut out).execute(content.clone()) {
+    if let Err(e) = Interpreter::new(&mut out).execute(&content) {
         let mut stderr = BufWriter::new(io::stderr().lock());
         DiagnosticReporter::new(&mut stderr).report(&e, &content);
     }

@@ -137,7 +137,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
         LoxError::SyntaxError { message, span }
     }
 
-    pub fn execute(&mut self, line: String) -> Result<(), LoxError> {
+    pub fn execute(&mut self, line: &str) -> Result<(), LoxError> {
         let stmts = parser::parse(line)?.into_iter().map(Rc::new);
         for stmt in stmts {
             if let Err(e) = self.stmt(stmt) {
@@ -421,7 +421,7 @@ mod tests {
         ($program:literal, $expected:literal $(,)*) => {
             let mut stdout = BufWriter::new(Vec::new());
             Interpreter::new(&mut stdout)
-                .execute($program.to_string())
+                .execute($program)
                 .unwrap();
             let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
             assert_eq!(output.trim(), $expected.to_string());
@@ -433,7 +433,7 @@ mod tests {
         ($program:literal, $expected:pat if $cond:expr) => {
             let mut stdout = BufWriter::new(Vec::new());
             match Interpreter::new(&mut stdout)
-                .execute($program.to_string())
+                .execute($program)
                 .unwrap_err()
             {
                 $expected if $cond => {}
