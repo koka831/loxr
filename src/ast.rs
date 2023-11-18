@@ -40,17 +40,17 @@ pub enum UnOp {
     Not,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Literal<'s> {
+#[derive(Debug, PartialEq, Clone)]
+pub enum Literal {
     Integer(i32),
     Float(f32),
-    String(&'s str),
+    String(String),
     True,
     False,
     Nil,
 }
 
-impl<'s> Literal<'s> {
+impl Literal {
     pub fn truthy(&self) -> bool {
         !self.falsy()
     }
@@ -60,7 +60,7 @@ impl<'s> Literal<'s> {
     }
 }
 
-impl<'s> From<bool> for Literal<'s> {
+impl From<bool> for Literal {
     fn from(value: bool) -> Self {
         if value {
             Literal::True
@@ -100,35 +100,29 @@ pub enum BinOp {
 
 #[derive(Debug, PartialEq)]
 /// undividable element of `Expr`
-pub enum Term<'s> {
-    Grouped(Box<Expr<'s>>),
-    Literal(Literal<'s>),
-    Ident(Ident<'s>),
-    FnCall {
-        callee: Ident<'s>,
-        arguments: Vec<Expr<'s>>,
-    },
+pub enum Term {
+    Grouped(Box<Expr>),
+    Literal(Literal),
+    Ident(Ident),
+    FnCall { callee: Ident, arguments: Vec<Expr> },
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ExprKind<'s> {
-    Binary(BinOp, Box<Expr<'s>>, Box<Expr<'s>>),
-    Unary(UnOp, Box<Expr<'s>>),
-    Term(Term<'s>),
+pub enum ExprKind {
+    Binary(BinOp, Box<Expr>, Box<Expr>),
+    Unary(UnOp, Box<Expr>),
+    Term(Term),
     // assign a value to a defined variable.
-    Assign {
-        name: Ident<'s>,
-        expr: Box<Expr<'s>>,
-    },
+    Assign { name: Ident, expr: Box<Expr> },
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Expr<'s> {
-    pub kind: ExprKind<'s>,
+pub struct Expr {
+    pub kind: ExprKind,
     pub span: Span,
 }
 
-impl<'s> Expr<'s> {
+impl Expr {
     pub fn nil() -> Self {
         Expr {
             kind: ExprKind::Term(Term::Literal(Literal::Nil)),
@@ -138,57 +132,57 @@ impl<'s> Expr<'s> {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct Ident<'s>(pub &'s str);
+pub struct Ident(pub String);
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Fn<'a> {
-    pub name: Ident<'a>,
-    pub params: Vec<Ident<'a>>,
-    pub body: Vec<Rc<Stmt<'a>>>,
+pub struct Fn {
+    pub name: Ident,
+    pub params: Vec<Ident>,
+    pub body: Vec<Rc<Stmt>>,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum StmtKind<'s> {
+pub enum StmtKind {
     /// expression ;
     /// used for call an expression with side-effect.
-    Expr(Expr<'s>),
+    Expr(Expr),
     /// print expression ;
-    Print(Expr<'s>),
+    Print(Expr),
     /// function declaration
     /// fun ident ( params ) { stmt }
-    DefFun(Fn<'s>),
+    DefFun(Fn),
     /// variable declaration
     /// var ident ( = expr )? ;
     DeclVar {
-        name: Ident<'s>,
-        initializer: Rc<Expr<'s>>,
+        name: Ident,
+        initializer: Rc<Expr>,
     },
-    Block(Vec<Rc<Stmt<'s>>>),
+    Block(Vec<Rc<Stmt>>),
     /// if ( expr ) statement ( else statement )?
     If {
-        condition: Expr<'s>,
-        then_branch: Rc<Stmt<'s>>,
-        else_branch: Option<Rc<Stmt<'s>>>,
+        condition: Expr,
+        then_branch: Rc<Stmt>,
+        else_branch: Option<Rc<Stmt>>,
     },
     /// while ( expr ) statement
     While {
-        condition: Expr<'s>,
-        stmt: Rc<Stmt<'s>>,
+        condition: Expr,
+        stmt: Rc<Stmt>,
     },
     /// for (init; (test; (after;)? )?) stmt
     For {
-        init: Rc<Stmt<'s>>,
-        test: Option<Rc<Expr<'s>>>,
-        after: Option<Rc<Expr<'s>>>,
-        body: Rc<Stmt<'s>>,
+        init: Rc<Stmt>,
+        test: Option<Rc<Expr>>,
+        after: Option<Rc<Expr>>,
+        body: Rc<Stmt>,
     },
     /// return expr? ;
-    Return(Option<Rc<Expr<'s>>>),
+    Return(Option<Rc<Expr>>),
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Stmt<'s> {
-    pub kind: StmtKind<'s>,
+pub struct Stmt {
+    pub kind: StmtKind,
     pub span: Span,
 }
 
@@ -226,7 +220,7 @@ impl fmt::Display for BinOp {
     }
 }
 
-impl<'s> fmt::Display for Literal<'s> {
+impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Literal::*;
 
@@ -243,13 +237,13 @@ impl<'s> fmt::Display for Literal<'s> {
     }
 }
 
-impl<'s> fmt::Display for Ident<'s> {
+impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<'s> fmt::Display for Fn<'s> {
+impl fmt::Display for Fn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let params = self
             .params
@@ -261,7 +255,7 @@ impl<'s> fmt::Display for Fn<'s> {
     }
 }
 
-impl<'s> fmt::Display for Term<'s> {
+impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Term::Grouped(box expr) => write!(f, "({expr})"),
@@ -279,7 +273,7 @@ impl<'s> fmt::Display for Term<'s> {
     }
 }
 
-impl<'s> fmt::Display for Expr<'s> {
+impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             ExprKind::Unary(op, box expr) => {
@@ -296,7 +290,7 @@ impl<'s> fmt::Display for Expr<'s> {
     }
 }
 
-impl<'s> fmt::Display for Stmt<'s> {
+impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StmtKind::Expr(expr) => expr.fmt(f),

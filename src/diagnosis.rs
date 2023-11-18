@@ -29,7 +29,7 @@ impl<'a, W: io::Write> DiagnosticReporter<'a, W> {
     }
 }
 
-impl<'a> Report for LoxError<'a> {
+impl Report for LoxError {
     fn report(&self, source: &str) -> miette::Report {
         match self {
             LoxError::LexError { e, span } => {

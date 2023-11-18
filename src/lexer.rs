@@ -6,7 +6,7 @@ use crate::{
     token::{NumberKind, Token, TokenKind},
 };
 
-type Lexed<'s> = Option<Token<'s>>;
+type Lexed<'s> = Option<Token>;
 type LexResult<'s> = std::result::Result<Lexed<'s>, LexError>;
 
 pub struct Lexer<'source> {
@@ -77,7 +77,7 @@ impl<'s> Lexer<'s> {
 
         Ok(Some(Token {
             // current pos is at the closing `"`
-            kind: TokenKind::String(&self.source[from + 1..self.pos - 1]),
+            kind: TokenKind::String(self.source[from + 1..self.pos - 1].to_string()),
             // includes surrounding `"`
             span: Span::new(from, self.pos),
         }))
@@ -249,7 +249,7 @@ impl<'s> Lexer<'s> {
             "true" => True,
             "var" => Var,
             "while" => While,
-            _ => Ident(ident_str),
+            _ => Ident(ident_str.to_string()),
         };
 
         Ok(Some(Token { kind, span }))
@@ -311,7 +311,7 @@ impl<'s> Lexer<'s> {
 }
 
 impl<'s> Iterator for Lexer<'s> {
-    type Item = Result<Token<'s>, LexError>;
+    type Item = Result<Token, LexError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.lex().transpose()
@@ -323,7 +323,7 @@ mod test_lex {
     use super::*;
     use crate::token::{NumberKind, TokenKind::*};
 
-    fn lex(source: &str) -> Result<Vec<Token<'_>>, LexError> {
+    fn lex(source: &str) -> Result<Vec<Token>, LexError> {
         Lexer::new(source).collect()
     }
 
@@ -368,14 +368,17 @@ mod test_lex {
     #[test]
     fn lex_string() {
         let lexed = lex(r#""hello""#).unwrap();
-        assert_eq!(lexed[0].kind, String("hello"));
+        assert_eq!(lexed[0].kind, String("hello".to_string()));
         assert_eq!(lexed[0].span, Span::new(0, 7));
 
         // unterminated string
         assert_lex_error!(r#""abc"#, LexError::UnterminatedString(..));
 
         // accepts multiline string
-        assert_eq!(lex(r#""xxx\nxxx""#).unwrap()[0].kind, String("xxx\\nxxx"));
+        assert_eq!(
+            lex(r#""xxx\nxxx""#).unwrap()[0].kind,
+            String("xxx\\nxxx".to_string())
+        );
     }
 
     #[test]
@@ -396,7 +399,7 @@ mod test_lex {
     #[test]
     fn lex_ident() {
         let lexed = lex("foo").unwrap();
-        assert_eq!(lexed[0].kind, Ident("foo"));
+        assert_eq!(lexed[0].kind, Ident("foo".to_string()));
         assert_eq!(lexed[0].span, Span::new(0, 3));
 
         assert_lex!(
@@ -410,6 +413,9 @@ mod test_lex {
 
     #[test]
     fn lex_stmt() {
-        assert_lex!(r#"print "hi";"#, vec![Print, String("hi"), Semicolon]);
+        assert_lex!(
+            r#"print "hi";"#,
+            vec![Print, String("hi".to_string()), Semicolon]
+        );
     }
 }

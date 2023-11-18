@@ -1,6 +1,6 @@
 use std::env;
 
-use loxr::exec_file;
+use loxr::{exec_file, prompt};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 fn main() {
@@ -16,7 +16,7 @@ fn main() {
     let res = if let Some(fpath) = args.get(1) {
         exec_file(fpath)
     } else {
-        todo!("support REPL")
+        prompt()
     };
 
     if let Err(e) = res {

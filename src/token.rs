@@ -3,20 +3,20 @@ use std::fmt;
 use crate::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Token<'s> {
-    pub kind: TokenKind<'s>,
+pub struct Token {
+    pub kind: TokenKind,
     pub span: Span,
 }
 
-impl<'s> Token<'s> {
-    pub fn new(kind: TokenKind, span: Span) -> Token<'_> {
+impl Token {
+    pub fn new(kind: TokenKind, span: Span) -> Token {
         Token { kind, span }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub enum TokenKind<'s> {
+pub enum TokenKind {
     // keyword
     And,
     Class,
@@ -35,8 +35,8 @@ pub enum TokenKind<'s> {
     While,
 
     // literal
-    Ident(&'s str),
-    String(&'s str),
+    Ident(String),
+    String(String),
     Number(NumberKind),
 
     /// (
@@ -86,13 +86,13 @@ pub enum NumberKind {
     Float(f32),
 }
 
-impl<'a> fmt::Display for Token<'a> {
+impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.kind)
     }
 }
 
-impl<'a> fmt::Display for TokenKind<'a> {
+impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let token = match self {
             TokenKind::And => "and",

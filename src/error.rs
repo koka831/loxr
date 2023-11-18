@@ -1,10 +1,8 @@
-use std::borrow::Cow;
-
 use crate::{interpreter::Rt, span::Span, token::Token};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum LoxError<'a> {
+pub enum LoxError {
     #[error("failed to tokenize at {span:?}: {e}")]
     LexError { e: LexError, span: Span },
 
@@ -12,13 +10,10 @@ pub enum LoxError<'a> {
     UnexpectedEOF,
 
     #[error("unexpected token: expect {expect}, found `{actual}`")]
-    UnexpectedToken {
-        expect: Cow<'a, str>,
-        actual: Token<'a>,
-    },
+    UnexpectedToken { expect: String, actual: Token },
 
     #[error("syntax error at {span:?}: {message}")]
-    SyntaxError { message: Cow<'a, str>, span: Span },
+    SyntaxError { message: String, span: Span },
 
     #[error("could not read file: {0}")]
     IoError(#[from] std::io::Error),
@@ -27,7 +22,7 @@ pub enum LoxError<'a> {
     Other(anyhow::Error),
 
     #[error("internal use")]
-    _Return(Rt<'a>),
+    _Return(Rt),
 }
 
 #[derive(Debug, Copy, Clone, Error)]
@@ -48,13 +43,13 @@ impl LexError {
     }
 }
 
-impl<'a> From<LexError> for LoxError<'a> {
+impl From<LexError> for LoxError {
     fn from(e: LexError) -> Self {
         LoxError::LexError { e, span: e.span() }
     }
 }
 
-impl From<anyhow::Error> for LoxError<'_> {
+impl From<anyhow::Error> for LoxError {
     fn from(e: anyhow::Error) -> Self {
         LoxError::Other(e)
     }

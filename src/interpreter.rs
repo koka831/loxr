@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt, io, rc::Rc};
+use std::{fmt, io, rc::Rc};
 
 use anyhow::anyhow;
 use rustc_hash::FxHashMap;
@@ -11,19 +11,19 @@ use crate::{
 };
 
 #[derive(Default)]
-pub struct Environment<'scope> {
-    table: SymbolTable<'scope>,
+pub struct Environment {
+    table: SymbolTable,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 /// represents runtime value
-pub enum Rt<'s> {
-    Literal(Literal<'s>),
+pub enum Rt {
+    Literal(Literal),
     // function ptr
-    Fn(Rc<Fn<'s>>),
+    Fn(Rc<Fn>),
     Void,
 }
-impl<'s> Rt<'s> {
+impl Rt {
     pub fn truthy(&self) -> bool {
         match self {
             Rt::Literal(l) => l.truthy(),
@@ -32,7 +32,7 @@ impl<'s> Rt<'s> {
         }
     }
 }
-impl<'s> fmt::Display for Rt<'s> {
+impl fmt::Display for Rt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Rt::Literal(l) => l.fmt(f),
@@ -43,34 +43,34 @@ impl<'s> fmt::Display for Rt<'s> {
 }
 
 #[derive(Default)]
-pub struct SymbolTable<'scope> {
-    env: FxHashMap<Ident<'scope>, Rt<'scope>>,
-    enclosing: Option<Box<SymbolTable<'scope>>>,
+pub struct SymbolTable {
+    env: FxHashMap<Ident, Rt>,
+    enclosing: Option<Box<SymbolTable>>,
 }
 
-impl<'s> Environment<'s> {
+impl Environment {
     pub fn new() -> Self {
         let table = SymbolTable::new();
         Environment { table }
     }
 
-    pub fn define(&mut self, ident: Ident<'s>, expr: Rt<'s>) {
+    pub fn define(&mut self, ident: Ident, expr: Rt) {
         tracing::info!("define {ident} = {expr}");
         self.table.define(ident, expr);
     }
 
-    pub fn assign(&mut self, ident: Ident<'s>, expr: Rt<'s>) -> Result<(), LoxError<'s>> {
+    pub fn assign(&mut self, ident: Ident, expr: Rt) -> Result<(), LoxError> {
         tracing::info!("assign {ident} = {expr}");
         self.table.assign(ident, expr)
     }
 
-    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Rt<'s>> {
+    pub fn lookup(&self, ident: &Ident) -> Option<&Rt> {
         tracing::debug!("look up {ident}");
         self.table.lookup(ident)
     }
 
     /// creates a nested/scoped environment that is used while executing a block statement.
-    pub fn nest_scope<'a>(&mut self) -> Result<(), LoxError<'a>> {
+    pub fn nest_scope(&mut self) -> Result<(), LoxError> {
         tracing::info!("create an nested block");
         let current_table = std::mem::take(&mut self.table);
         self.table = SymbolTable {
@@ -80,7 +80,7 @@ impl<'s> Environment<'s> {
         Ok(())
     }
 
-    pub fn exit_scope<'a>(&mut self) -> Result<(), LoxError<'a>> {
+    pub fn exit_scope(&mut self) -> Result<(), LoxError> {
         tracing::info!("exit an nested block");
         assert!(self.table.enclosing.is_some());
         self.table = *self.table.enclosing.take().unwrap();
@@ -88,18 +88,18 @@ impl<'s> Environment<'s> {
     }
 }
 
-impl<'s> SymbolTable<'s> {
+impl SymbolTable {
     pub fn new() -> Self {
         let env = FxHashMap::default();
         let enclosing = None;
         SymbolTable { env, enclosing }
     }
 
-    pub fn define(&mut self, ident: Ident<'s>, expr: Rt<'s>) {
+    pub fn define(&mut self, ident: Ident, expr: Rt) {
         self.env.insert(ident, expr);
     }
 
-    pub fn assign(&mut self, ident: Ident<'s>, expr: Rt<'s>) -> Result<(), LoxError<'s>> {
+    pub fn assign(&mut self, ident: Ident, expr: Rt) -> Result<(), LoxError> {
         if self.env.get(&ident).is_some() {
             self.define(ident, expr);
         } else {
@@ -114,31 +114,30 @@ impl<'s> SymbolTable<'s> {
         Ok(())
     }
 
-    pub fn lookup<'a>(&'a self, ident: &Ident<'a>) -> Option<&Rt<'s>> {
+    pub fn lookup(&self, ident: &Ident) -> Option<&Rt> {
         self.env
             .get(ident)
             .or_else(|| self.enclosing.as_ref().and_then(|t| t.lookup(ident)))
     }
 }
 
-pub struct Interpreter<'a, 's: 'a, W: io::Write> {
+pub struct Interpreter<'s, W: io::Write> {
     writer: &'s mut W,
-    env: Environment<'a>,
+    env: Environment,
     // TODO: hold current cursor (span)
 }
 
-impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
+impl<'s, W: io::Write> Interpreter<'s, W> {
     pub fn new(writer: &'s mut W) -> Self {
         let env = Environment::new();
         Interpreter { writer, env }
     }
 
-    fn error(&self, message: String, span: Span) -> LoxError<'a> {
-        let message = Cow::Owned(message);
+    fn error(&self, message: String, span: Span) -> LoxError {
         LoxError::SyntaxError { message, span }
     }
 
-    pub fn execute(&mut self, line: &'a str) -> Result<(), LoxError<'a>> {
+    pub fn execute(&mut self, line: String) -> Result<(), LoxError> {
         let stmts = parser::parse(line)?.into_iter().map(Rc::new);
         for stmt in stmts {
             if let Err(e) = self.stmt(stmt) {
@@ -153,7 +152,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
         Ok(())
     }
 
-    fn stmt(&mut self, stmt: Rc<Stmt<'a>>) -> Result<(), LoxError<'a>> {
+    fn stmt(&mut self, stmt: Rc<Stmt>) -> Result<(), LoxError> {
         match &stmt.kind {
             StmtKind::Expr(ref expr) => {
                 self.expr(expr)?;
@@ -241,13 +240,13 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
         Ok(())
     }
 
-    fn expr(&mut self, expr: &Expr<'a>) -> Result<Rt<'a>, LoxError<'a>> {
+    fn expr(&mut self, expr: &Expr) -> Result<Rt, LoxError> {
         match &expr.kind {
             ExprKind::Term(term) => Ok(self.term(term)?),
-            ExprKind::Unary(op, expr) => match expr.kind {
+            ExprKind::Unary(op, expr) => match &expr.kind {
                 ExprKind::Term(Term::Literal(literal)) => {
                     let lit = self
-                        .apply_unary(*op, Rt::Literal(literal))
+                        .apply_unary(*op, Rt::Literal(literal.clone()))
                         .map_err(|e| self.error(e, expr.span))?;
 
                     Ok(lit)
@@ -273,8 +272,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
                         };
 
                         let s = format!("{lhv}{rhv}");
-                        // FIXME: hold static string or cow
-                        Ok(Rt::Literal(Literal::String(s.leak())))
+                        Ok(Rt::Literal(Literal::String(s)))
                     }
                     Rt::Literal(Literal::Integer(lhv)) => {
                         let Rt::Literal(Literal::Integer(rhv)) = rhs else {
@@ -342,9 +340,9 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
         }
     }
 
-    fn term(&mut self, term: &Term<'a>) -> Result<Rt<'a>, LoxError<'a>> {
+    fn term(&mut self, term: &Term) -> Result<Rt, LoxError> {
         match &term {
-            Term::Literal(lit) => Ok(Rt::Literal(*lit)),
+            Term::Literal(lit) => Ok(Rt::Literal(lit.clone())),
             Term::Grouped(box expr) => Ok(self.expr(expr)?),
             Term::Ident(ident) => {
                 let Some(value) = self.env.lookup(ident) else {
@@ -392,7 +390,7 @@ impl<'a, 's, W: io::Write> Interpreter<'a, 's, W> {
         }
     }
 
-    fn apply_unary(&self, op: UnOp, v: Rt<'a>) -> Result<Rt<'a>, String> {
+    fn apply_unary(&self, op: UnOp, v: Rt) -> Result<Rt, String> {
         let v = match v {
             Rt::Literal(Literal::True) if op == UnOp::Not => Literal::False,
             Rt::Literal(Literal::False) if op == UnOp::Not => Literal::True,
@@ -422,7 +420,9 @@ mod tests {
     macro_rules! assert_interpret {
         ($program:literal, $expected:literal $(,)*) => {
             let mut stdout = BufWriter::new(Vec::new());
-            Interpreter::new(&mut stdout).execute($program).unwrap();
+            Interpreter::new(&mut stdout)
+                .execute($program.to_string())
+                .unwrap();
             let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
             assert_eq!(output.trim(), $expected.to_string());
         };
@@ -432,14 +432,20 @@ mod tests {
         // use `$cond` to compare an inner value of `Cow`
         ($program:literal, $expected:pat if $cond:expr) => {
             let mut stdout = BufWriter::new(Vec::new());
-            match Interpreter::new(&mut stdout).execute($program).unwrap_err() {
+            match Interpreter::new(&mut stdout)
+                .execute($program.to_string())
+                .unwrap_err()
+            {
                 $expected if $cond => {}
                 e => panic!("unexpected error {e:?}"),
             }
         };
         ($program:literal, $expected:expr $(,)*) => {
             let mut stdout = BufWriter::new(Vec::new());
-            match Interpreter::new(&mut stdout).execute($program).unwrap_err() {
+            match Interpreter::new(&mut stdout)
+                .execute($program.to_string())
+                .unwrap_err()
+            {
                 $expected => {}
                 e => panic!("unexpected error {e:?}"),
             }
@@ -467,7 +473,10 @@ mod tests {
         assert_redex("false or true", Literal::True);
         assert_redex("false or false", Literal::False);
         assert_redex("true and nil", Literal::False);
-        assert_redex(r#""hello, " + "world""#, Literal::String("hello, world"));
+        assert_redex(
+            r#""hello, " + "world""#,
+            Literal::String("hello, world".into()),
+        );
     }
 
     #[test]

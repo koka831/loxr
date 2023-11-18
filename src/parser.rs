@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter::Peekable, rc::Rc};
+use std::{iter::Peekable, rc::Rc};
 
 use crate::{
     ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp},
@@ -8,10 +8,10 @@ use crate::{
     token::{self, Token, TokenKind},
 };
 
-type ParseResult<'s, T> = std::result::Result<T, LoxError<'s>>;
+type ParseResult<T> = std::result::Result<T, LoxError>;
 
-pub fn parse(source: &str) -> Result<Vec<Stmt<'_>>, LoxError<'_>> {
-    let mut parser = Parser::new(source);
+pub fn parse(source: String) -> Result<Vec<Stmt>, LoxError> {
+    let mut parser = Parser::new(&source);
     let mut stmts = Vec::new();
     while !parser.eof() {
         let stmt = parser.parse()?;
@@ -22,12 +22,12 @@ pub fn parse(source: &str) -> Result<Vec<Stmt<'_>>, LoxError<'_>> {
 }
 
 pub trait Parse<'a>: Sized {
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self>;
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self>;
 }
 
-struct TokenStream<'ast> {
-    tokens: Peekable<Lexer<'ast>>,
-    peeked: Option<Result<Token<'ast>, LexError>>,
+struct TokenStream<'a> {
+    tokens: Peekable<Lexer<'a>>,
+    peeked: Option<Result<Token, LexError>>,
     current_span: Span,
 }
 
@@ -47,11 +47,11 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    fn peek(&self) -> Option<&Result<Token<'a>, LexError>> {
+    fn peek(&self) -> Option<&Result<Token, LexError>> {
         self.peeked.as_ref()
     }
 
-    fn next(&mut self) -> Option<Result<Token<'a>, LexError>> {
+    fn next(&mut self) -> Option<Result<Token, LexError>> {
         let next = self.peeked.take().or_else(|| self.tokens.next());
         if let Some(Ok(ref token)) = next {
             self.current_span = token.span;
@@ -76,7 +76,7 @@ impl<'a> Parser<'a> {
         Parser { tokens }
     }
 
-    pub fn parse<P: Parse<'a>>(&mut self) -> ParseResult<'a, P> {
+    pub fn parse<P: Parse<'a>>(&mut self) -> ParseResult<P> {
         Parse::<'a>::parse(self)
     }
 
@@ -84,12 +84,12 @@ impl<'a> Parser<'a> {
         self.tokens.eof()
     }
 
-    fn unexpected_token<T>(&self, token: &Token<'a>, expect: Cow<'a, str>) -> ParseResult<'a, T> {
+    fn unexpected_token<T>(&self, token: &Token, expect: String) -> ParseResult<T> {
         let actual = token.clone();
         Err(LoxError::UnexpectedToken { expect, actual })
     }
 
-    fn peek(&self) -> ParseResult<'a, &Token<'a>> {
+    fn peek(&self) -> ParseResult<&Token> {
         match self.tokens.peek() {
             Some(Ok(ref token)) => {
                 tracing::debug!("peeked token: {token}");
@@ -100,7 +100,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn next(&mut self) -> ParseResult<'a, Token<'a>> {
+    fn next(&mut self) -> ParseResult<Token> {
         match self.tokens.next() {
             Some(Ok(token)) => {
                 tracing::debug!("next token: {token}");
@@ -113,7 +113,7 @@ impl<'a> Parser<'a> {
 
     /// consume the next token iff token == `expected`.
     #[tracing::instrument(skip(self))]
-    fn eat(&mut self, expected: TokenKind<'a>) -> ParseResult<'a, Token<'a>> {
+    fn eat(&mut self, expected: TokenKind) -> ParseResult<Token> {
         let token = self.peek();
         match token {
             Ok(token) if token.kind == expected => {
@@ -121,7 +121,7 @@ impl<'a> Parser<'a> {
                 tracing::info!("eat token `{token}`");
                 Ok(token)
             }
-            Ok(actual) => self.unexpected_token(actual, Cow::Owned(format!("`{expected}`"))),
+            Ok(actual) => self.unexpected_token(actual, format!("`{expected}`")),
             Err(e) => Err(e),
         }
     }
@@ -131,16 +131,16 @@ impl<'a> Parser<'a> {
     }
 }
 
-impl<'a> Parse<'a> for Literal<'a> {
+impl<'a> Parse<'a> for Literal {
     #[tracing::instrument(name = "Parse<Literal>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let token = parser.peek()?;
         let lit = match &token.kind {
             TokenKind::Number(ref kind) => match kind {
                 token::NumberKind::Float(f) => Literal::Float(*f),
                 token::NumberKind::Integer(i) => Literal::Integer(*i),
             },
-            TokenKind::String(str) => Literal::String(str),
+            TokenKind::String(str) => Literal::String(str.to_string()),
             TokenKind::True => Literal::True,
             TokenKind::False => Literal::False,
             TokenKind::Nil => Literal::Nil,
@@ -153,9 +153,9 @@ impl<'a> Parse<'a> for Literal<'a> {
     }
 }
 
-impl<'a> Parse<'a> for Ident<'a> {
+impl<'a> Parse<'a> for Ident {
     #[tracing::instrument(name = "Parse<Ident>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let token = parser.next()?;
         match token.kind {
             TokenKind::Ident(name) => {
@@ -169,7 +169,7 @@ impl<'a> Parse<'a> for Ident<'a> {
 
 impl<'a> Parse<'a> for UnOp {
     #[tracing::instrument(name = "Parse<UnOp>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let token = parser.peek()?;
         let op = match token.kind {
             TokenKind::Minus => UnOp::Minus,
@@ -185,7 +185,7 @@ impl<'a> Parse<'a> for UnOp {
 
 impl<'a> Parse<'a> for BinOp {
     #[tracing::instrument(name = "Parse<BinOp>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         use TokenKind::*;
 
         let token = parser.peek()?;
@@ -202,7 +202,7 @@ impl<'a> Parse<'a> for BinOp {
             Star => BinOp::Mul,
             And => BinOp::And,
             Or => BinOp::Or,
-            _ => return parser.unexpected_token(token, Cow::Borrowed("binary operator")),
+            _ => return parser.unexpected_token(token, "binary operator".to_string()),
         };
 
         parser.next()?;
@@ -211,9 +211,9 @@ impl<'a> Parse<'a> for BinOp {
     }
 }
 
-impl<'a> Parse<'a> for Term<'a> {
+impl<'a> Parse<'a> for Term {
     #[tracing::instrument(name = "Parse<Term>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let token = parser.peek()?;
         let term = match token.kind {
             TokenKind::LParen => {
@@ -253,9 +253,9 @@ impl<'a> Parse<'a> for Term<'a> {
     }
 }
 
-impl<'a> Parse<'a> for Expr<'a> {
+impl<'a> Parse<'a> for Expr {
     #[tracing::instrument(name = "Parse<Expr>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let token = parser.peek()?;
         let span = token.span;
 
@@ -333,9 +333,9 @@ impl<'a> Parse<'a> for Expr<'a> {
     }
 }
 
-impl<'a> Parse<'a> for Stmt<'a> {
+impl<'a> Parse<'a> for Stmt {
     #[tracing::instrument(name = "Parse<Stmt>", skip(parser))]
-    fn parse(parser: &mut Parser<'a>) -> ParseResult<'a, Self> {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let token = parser.peek()?;
         let span = token.span;
 
@@ -377,8 +377,7 @@ impl<'a> Parse<'a> for Stmt<'a> {
                         ..
                     } => block,
                     stmt => {
-                        let message =
-                            Cow::Owned(format!("function body must be a block: `{stmt}`"));
+                        let message = format!("function body must be a block: `{stmt}`");
                         let span = stmt.span;
                         return Err(LoxError::SyntaxError { message, span });
                     }
@@ -463,7 +462,7 @@ impl<'a> Parse<'a> for Stmt<'a> {
                     stmt => {
                         tracing::warn!("unexpected stmt kind in init section of for statement");
                         return Err(LoxError::SyntaxError {
-                            message: Cow::Borrowed("unexpected statement"),
+                            message: "unexpected statement".to_string(),
                             span: stmt.span,
                         });
                     }
@@ -580,7 +579,7 @@ mod tests {
     fn parse_literal() {
         assert_parse!("12", Literal::Integer(12));
         assert_parse!("12.3", Literal::Float(..));
-        assert_parse!(r#""string""#, Literal::String("string"));
+        assert_parse(r#""string""#, Literal::String("string".into()));
         assert_parse!("true", Literal::True);
         assert_parse!("false", Literal::False);
         assert_parse!("nil", Literal::Nil);
@@ -593,14 +592,14 @@ mod tests {
         assert_parse!(
             "fn()",
             Term::FnCall {
-                callee: Ident("fn"),
+                callee: Ident(..),
                 arguments
             } if arguments == vec![]
         );
         assert_parse!(
             "add(1, 2)",
             Term::FnCall {
-                callee: Ident("add"),
+                callee: Ident(..),
                 arguments,
             } if arguments == vec![
                 Expr {
@@ -688,7 +687,7 @@ mod tests {
             "x = 10",
             Expr {
                 kind: ExprKind::Assign {
-                    name: Ident("x"),
+                    name: Ident(..),
                     expr: box Expr {
                         kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
                         ..
@@ -853,7 +852,7 @@ mod tests {
             r#"print "hi";"#,
             Stmt {
                 kind: StmtKind::Print(Expr {
-                    kind: ExprKind::Term(Term::Literal(Literal::String("hi"))),
+                    kind: ExprKind::Term(Term::Literal(Literal::String(..))),
                     ..
                 }),
                 ..
@@ -863,7 +862,7 @@ mod tests {
             "print x;",
             Stmt {
                 kind: StmtKind::Print(Expr {
-                    kind: ExprKind::Term(Term::Ident(Ident("x"))),
+                    kind: ExprKind::Term(Term::Ident(Ident(..))),
                     ..
                 }),
                 ..
@@ -876,14 +875,14 @@ mod tests {
         assert_parse!(
             "var x1_0;",
             Stmt {
-                kind: StmtKind::DeclVar { name: Ident("x1_0"), initializer },
+                kind: StmtKind::DeclVar { name: Ident(name), initializer },
                 ..
-            } if *initializer == Expr::nil()
+            } if &name == "x1_0" && *initializer == Expr::nil()
         );
         assert_parse!(
             "var x = 10;",
             Stmt {
-                kind: StmtKind::DeclVar { name: Ident("x"), initializer },
+                kind: StmtKind::DeclVar { name: Ident(..), initializer },
                 ..
             } if *initializer => Expr {
                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -894,7 +893,7 @@ mod tests {
             "x = 10;",
             Stmt {
                 kind: StmtKind::Expr(Expr {
-                    kind: ExprKind::Assign { name: Ident("x"), expr },
+                    kind: ExprKind::Assign { expr, .. },
                     ..
                 }),
                 ..
@@ -916,7 +915,7 @@ mod tests {
             Stmt {
                 kind: StmtKind::Block(vec![Stmt {
                     kind: StmtKind::DeclVar {
-                        name: Ident("x"),
+                        name: Ident("x".into()),
                         initializer: Expr {
                             kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
                             span: Span::new(10, 12),
@@ -935,7 +934,7 @@ mod tests {
                 kind: StmtKind::Block(vec![
                     Stmt {
                         kind: StmtKind::DeclVar {
-                            name: Ident("x"),
+                            name: Ident("x".into()),
                             initializer: Expr {
                                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
                                 span: Span::new(10, 12),
@@ -947,7 +946,7 @@ mod tests {
                     .into(),
                     Stmt {
                         kind: StmtKind::Print(Expr {
-                            kind: ExprKind::Term(Term::Ident(Ident("x"))),
+                            kind: ExprKind::Term(Term::Ident(Ident("x".into()))),
                             span: Span::new(20, 21),
                         }),
                         span: Span::new(14, 22),
@@ -1063,24 +1062,16 @@ mod tests {
         assert_parse!(
             "fun x(){}",
             Stmt {
-                kind: StmtKind::DefFun(Fn {
-                    name: Ident("x"),
-                    params,
-                    ..
-                }),
+                kind: StmtKind::DefFun(Fn { name, params, .. }),
                 ..
-            } if params.is_empty()
+            } if name == Ident("x".into()) && params.is_empty()
         );
         assert_parse!(
             "fun add(a, b) { print a + b; }",
             Stmt {
-                kind: StmtKind::DefFun(Fn {
-                    name: Ident("add"),
-                    params,
-                    ..
-                }),
+                kind: StmtKind::DefFun(Fn { name, params, .. }),
                 ..
-            } if params == vec![Ident("a"), Ident("b")]
+            } if name == Ident("add".into()) && params == vec![Ident("a".into()), Ident("b".into())]
         );
         assert_parse_err!(
             "fun add(a, b) print a + b;",
