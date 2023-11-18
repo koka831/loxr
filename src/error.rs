@@ -1,4 +1,6 @@
-use crate::{interpreter::Rt, span::Span, token::Token};
+use crate::interpreter::Rt;
+use crate::span::Span;
+use crate::token::Token;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

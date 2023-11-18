@@ -1,7 +1,8 @@
 use std::env;
 
 use loxr::{exec_file, prompt};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt, EnvFilter};
 
 fn main() {
     let filter_layer = EnvFilter::try_from_default_env()

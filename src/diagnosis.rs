@@ -2,7 +2,8 @@ use std::io;
 
 use miette::{LabeledSpan, MietteDiagnostic};
 
-use crate::{error::LoxError, span::Span};
+use crate::error::LoxError;
+use crate::span::Span;
 
 pub trait Report {
     fn report(&self, source: &str) -> miette::Report;

@@ -3,15 +3,15 @@
 #![feature(let_chains)]
 #![feature(assert_matches)]
 
-use std::{
-    io::{self, BufWriter},
-    path::Path,
-};
+use std::io::{self, BufWriter};
+use std::path::Path;
 
 use error::LoxError;
-use rustyline::{error::ReadlineError, DefaultEditor};
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 
-use crate::{diagnosis::DiagnosticReporter, interpreter::Interpreter};
+use crate::diagnosis::DiagnosticReporter;
+use crate::interpreter::Interpreter;
 
 pub mod ast;
 pub mod diagnosis;

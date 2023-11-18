@@ -1,12 +1,11 @@
-use std::{iter::Peekable, rc::Rc};
+use std::iter::Peekable;
+use std::rc::Rc;
 
-use crate::{
-    ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp},
-    error::{LexError, LoxError},
-    lexer::Lexer,
-    span::Span,
-    token::{self, Token, TokenKind},
-};
+use crate::ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::error::{LexError, LoxError};
+use crate::lexer::Lexer;
+use crate::span::Span;
+use crate::token::{self, Token, TokenKind};
 
 type ParseResult<T> = std::result::Result<T, LoxError>;
 
@@ -534,7 +533,8 @@ impl<'a> Parse<'a> for Stmt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{assert_matches::assert_matches, fmt};
+    use std::assert_matches::assert_matches;
+    use std::fmt;
 
     fn assert_parse<'a, P>(source: &'a str, expect: P)
     where

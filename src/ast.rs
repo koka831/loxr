@@ -30,7 +30,8 @@
 //!             | "while" "(" expression ")" statement ;
 //!             | "for" "(" (DeclVar | expr stmt | ";") expression? ";" expression? ")" statement ;
 //!             | "return" expression? ";" ;
-use std::{fmt, rc::Rc};
+use std::fmt;
+use std::rc::Rc;
 
 use crate::span::Span;
 

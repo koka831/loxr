@@ -1,10 +1,9 @@
-use std::{iter::Peekable, str::CharIndices};
+use std::iter::Peekable;
+use std::str::CharIndices;
 
-use crate::{
-    error::LexError,
-    span::{BytePos, Span},
-    token::{NumberKind, Token, TokenKind},
-};
+use crate::error::LexError;
+use crate::span::{BytePos, Span};
+use crate::token::{NumberKind, Token, TokenKind};
 
 type Lexed<'s> = Option<Token>;
 type LexResult<'s> = std::result::Result<Lexed<'s>, LexError>;
@@ -321,7 +320,8 @@ impl<'s> Iterator for Lexer<'s> {
 #[cfg(test)]
 mod test_lex {
     use super::*;
-    use crate::token::{NumberKind, TokenKind::*};
+    use crate::token::NumberKind;
+    use crate::token::TokenKind::*;
 
     fn lex(source: &str) -> Result<Vec<Token>, LexError> {
         Lexer::new(source).collect()

@@ -1,16 +1,15 @@
-use std::{fmt, io, rc::Rc};
+use std::rc::Rc;
+use std::{fmt, io};
 
 use anyhow::anyhow;
 use rustc_hash::FxHashMap;
 
-use crate::{
-    ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp},
-    error::LoxError,
-    parser,
-    span::Span,
-};
+use crate::ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::error::LoxError;
+use crate::parser;
+use crate::span::Span;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Environment {
     table: SymbolTable,
 }
@@ -23,6 +22,7 @@ pub enum Rt {
     Fn(Rc<Fn>),
     Void,
 }
+
 impl Rt {
     pub fn truthy(&self) -> bool {
         match self {
@@ -42,7 +42,7 @@ impl fmt::Display for Rt {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SymbolTable {
     env: FxHashMap<Ident, Rt>,
     enclosing: Option<Box<SymbolTable>>,
@@ -420,9 +420,7 @@ mod tests {
     macro_rules! assert_interpret {
         ($program:literal, $expected:literal $(,)*) => {
             let mut stdout = BufWriter::new(Vec::new());
-            Interpreter::new(&mut stdout)
-                .execute($program)
-                .unwrap();
+            Interpreter::new(&mut stdout).execute($program).unwrap();
             let output = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
             assert_eq!(output.trim(), $expected.to_string());
         };
@@ -432,10 +430,7 @@ mod tests {
         // use `$cond` to compare an inner value of `Cow`
         ($program:literal, $expected:pat if $cond:expr) => {
             let mut stdout = BufWriter::new(Vec::new());
-            match Interpreter::new(&mut stdout)
-                .execute($program)
-                .unwrap_err()
-            {
+            match Interpreter::new(&mut stdout).execute($program).unwrap_err() {
                 $expected if $cond => {}
                 e => panic!("unexpected error {e:?}"),
             }
