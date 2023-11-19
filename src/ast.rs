@@ -100,12 +100,18 @@ pub enum BinOp {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct FnCall {
+    pub callee: Ident,
+    pub arguments: Vec<Expr>,
+}
+
+#[derive(Debug, PartialEq)]
 /// undividable element of `Expr`
 pub enum Term {
     Grouped(Box<Expr>),
     Literal(Literal),
     Ident(Ident),
-    FnCall { callee: Ident, arguments: Vec<Expr> },
+    FnCall(FnCall),
 }
 
 #[derive(Debug, PartialEq)]
@@ -262,7 +268,7 @@ impl fmt::Display for Term {
             Term::Grouped(box expr) => write!(f, "({expr})"),
             Term::Literal(lit) => lit.fmt(f),
             Term::Ident(ident) => ident.fmt(f),
-            Term::FnCall { callee, arguments } => {
+            Term::FnCall(FnCall { callee, arguments }) => {
                 let arguments = arguments
                     .iter()
                     .map(|a| a.to_string())

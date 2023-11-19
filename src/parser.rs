@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::rc::Rc;
 
-use crate::ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::ast::{BinOp, Expr, ExprKind, Fn, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp};
 use crate::error::{LexError, LoxError};
 use crate::lexer::Lexer;
 use crate::span::Span;
@@ -233,10 +233,10 @@ impl<'a> Parse<'a> for Term {
                         if parser.eat(TokenKind::Comma).is_ok() {}
                     }
 
-                    Term::FnCall {
+                    Term::FnCall(FnCall {
                         callee: ident,
                         arguments,
-                    }
+                    })
                 } else {
                     Term::Ident(ident)
                 }
@@ -591,17 +591,17 @@ mod tests {
     fn parse_fncall_term() {
         assert_parse!(
             "fn()",
-            Term::FnCall {
+            Term::FnCall(FnCall {
                 callee: Ident(..),
                 arguments
-            } if arguments == vec![]
+            }) if arguments == vec![]
         );
         assert_parse!(
             "add(1, 2)",
-            Term::FnCall {
+            Term::FnCall(FnCall {
                 callee: Ident(..),
                 arguments,
-            } if arguments == vec![
+            }) if arguments == vec![
                 Expr {
                     kind: ExprKind::Term(Term::Literal(Literal::Integer(1))),
                     span: Span { base: 4, len: 1 },

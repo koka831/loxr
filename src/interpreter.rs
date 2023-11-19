@@ -4,10 +4,15 @@ use std::{fmt, io};
 use anyhow::anyhow;
 use rustc_hash::FxHashMap;
 
-use crate::ast::{BinOp, Expr, ExprKind, Fn, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::ast::{BinOp, Expr, ExprKind, Fn, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp};
 use crate::error::LoxError;
 use crate::parser;
 use crate::span::Span;
+
+/// trait for callable objects
+trait Call<'s, W: io::Write> {
+    fn call(&self, interpreter: &mut Interpreter<'s, W>) -> Result<Rt, LoxError>;
+}
 
 #[derive(Debug, Default)]
 pub struct Environment {
@@ -19,6 +24,7 @@ pub struct Environment {
 pub enum Rt {
     Literal(Literal),
     // function ptr
+    // TODO: use Ident
     Fn(Rc<Fn>),
     Void,
 }
@@ -353,40 +359,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
 
                 Ok(value.clone())
             }
-            Term::FnCall { callee, arguments } => {
-                let Some(Rt::Fn(func)) = self.env.lookup(callee) else {
-                    let message = format!("undefined function `{callee}`");
-                    return Err(self.error(message, Span::new(0, 0)));
-                };
-
-                let param_len = func.params.len();
-                let arg_len = arguments.len();
-                if param_len != arg_len {
-                    let message = format!("arity mismatch: expect {param_len}, given {arg_len}");
-                    return Err(self.error(message, Span::new(0, 0)));
-                }
-
-                // todo avoid clone
-                let params = func.params.clone();
-                let body = func.body.clone();
-
-                self.env.nest_scope()?;
-                for i in 0..param_len {
-                    let expr = self.expr(&arguments[i])?;
-                    tracing::info!("argument[{i}] = {expr}");
-                    self.env.define(params[i].clone(), expr);
-                }
-                for stmt in &body {
-                    if let Err(LoxError::_Return(rt)) = self.stmt(Rc::clone(stmt)) {
-                        tracing::info!("return {callee} with {rt}");
-                        self.env.exit_scope()?;
-                        return Ok(rt);
-                    }
-                }
-                self.env.exit_scope()?;
-
-                Ok(Rt::Literal(Literal::Nil))
-            }
+            Term::FnCall(fncall) => fncall.call(self),
         }
     }
 
@@ -400,6 +373,43 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
         };
 
         Ok(Rt::Literal(v))
+    }
+}
+
+impl<'s, W: io::Write> Call<'s, W> for FnCall {
+    fn call(&self, interpreter: &mut Interpreter<'s, W>) -> Result<Rt, LoxError> {
+        let Some(Rt::Fn(func)) = interpreter.env.lookup(&self.callee) else {
+            let message = format!("undefined function `{}`", self.callee);
+            return Err(interpreter.error(message, Span::new(0, 0)));
+        };
+
+        let param_len = func.params.len();
+        let arg_len = self.arguments.len();
+        if param_len != arg_len {
+            let message = format!("arity mismatch: expect {param_len}, given {arg_len}");
+            return Err(interpreter.error(message, Span::new(0, 0)));
+        }
+
+        // todo avoid clone
+        let params = func.params.clone();
+        let body = func.body.clone();
+
+        interpreter.env.nest_scope()?;
+        for i in 0..param_len {
+            let expr = interpreter.expr(&self.arguments[i])?;
+            tracing::info!("argument[{i}] = {expr}");
+            interpreter.env.define(params[i].clone(), expr);
+        }
+        for stmt in &body {
+            if let Err(LoxError::_Return(rt)) = interpreter.stmt(Rc::clone(stmt)) {
+                tracing::info!("return {} with {rt}", self.callee);
+                interpreter.env.exit_scope()?;
+                return Ok(rt);
+            }
+        }
+        interpreter.env.exit_scope()?;
+
+        Ok(Rt::Literal(Literal::Nil))
     }
 }
 
