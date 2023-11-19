@@ -2,6 +2,7 @@
 #![feature(box_patterns)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
+#![allow(clippy::needless_range_loop)]
 
 use std::io::{self, BufWriter};
 use std::path::Path;
