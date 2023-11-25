@@ -6,7 +6,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 fn main() {
     let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("rustyline=warn,loxr::lexer=warn,info"))
+        .or_else(|_| EnvFilter::try_new("rustyline=warn,loxr::lexer=warn,loxr::parser=warn,info"))
         .unwrap();
     tracing_subscriber::registry()
         .with(fmt::layer())

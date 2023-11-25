@@ -191,13 +191,15 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 self.env.define(name.clone(), evaluated)
             }
             StmtKind::DefFun(fun) => {
+                let name = fun.name.clone();
                 let fun = Function {
-                    name: fun.name.clone(),
+                    name: name.clone(),
                     parameters: fun.params.clone(),
                     body: fun.body.clone(),
                     closure: self.env.clone(),
                 };
                 self.functions.insert(fun.name.clone(), fun);
+                self.env.define(name.clone(), Rt::Fn(name.clone()));
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
@@ -401,7 +403,12 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
 
 impl<'s, W: io::Write> Call<'s, W> for FnCall {
     fn call(&self, interpreter: &mut Interpreter<'s, W>) -> Result<Rt, LoxError> {
-        let Some(def) = interpreter.functions.get(&self.callee) else {
+        let Some(Rt::Fn(ident)) = interpreter.env.lookup(&self.callee) else {
+            let message = format!("undefined ident `{}`", self.callee);
+            return Err(interpreter.error(message, Span::new(0, 0)));
+        };
+        let ident = ident.clone();
+        let Some(def) = interpreter.functions.get(&ident) else {
             let message = format!("undefined function `{}`", self.callee);
             return Err(interpreter.error(message, Span::new(0, 0)));
         };
@@ -417,19 +424,33 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
         let params = def.parameters.clone();
         let body = def.body.clone();
 
+        let mut env = def.closure.clone();
+
         interpreter.env.nest_scope()?;
         for i in 0..param_len {
             let expr = interpreter.expr(&self.arguments[i])?;
             tracing::info!("argument[{i}] = {expr}");
             interpreter.env.define(params[i].clone(), expr);
         }
+
+        // preserve environments
+        let preserved_env = interpreter.env.clone();
+        env.table.env.extend(preserved_env.table.env.clone());
+        interpreter.env = env;
+
         for stmt in &body {
             if let Err(LoxError::_Return(rt)) = interpreter.stmt(Rc::clone(stmt)) {
                 tracing::info!("return {} with {rt}", self.callee);
+                interpreter.env = preserved_env;
                 interpreter.env.exit_scope()?;
                 return Ok(rt);
             }
         }
+        let Some(def) = interpreter.functions.get_mut(&ident.clone()) else {
+            panic!("internal compiler error: could not update closure state");
+        };
+        def.closure = interpreter.env.clone();
+        interpreter.env = preserved_env;
         interpreter.env.exit_scope()?;
 
         Ok(Rt::Literal(Literal::Nil))
