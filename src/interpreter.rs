@@ -4,17 +4,20 @@ use std::{fmt, io};
 use anyhow::anyhow;
 use rustc_hash::FxHashMap;
 
-use crate::ast::{BinOp, Expr, ExprKind, Fn, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::ast::{BinOp, Expr, ExprKind, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp};
 use crate::error::LoxError;
 use crate::parser;
 use crate::span::Span;
 
 /// trait for callable objects
 trait Call<'s, W: io::Write> {
-    fn call(&self, interpreter: &mut Interpreter<'s, W>) -> Result<Rt, LoxError>;
+    fn call(
+        &self,
+        interpreter: &mut Interpreter<'s, W>, /* args: &[Rt] */
+    ) -> Result<Rt, LoxError>;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Environment {
     table: SymbolTable,
 }
@@ -24,9 +27,15 @@ pub struct Environment {
 pub enum Rt {
     Literal(Literal),
     // function ptr
-    // TODO: use Ident
-    Fn(Rc<Fn>),
+    Fn(Ident),
     Void,
+}
+
+pub struct Function {
+    pub name: Ident,
+    pub parameters: Vec<Ident>,
+    pub body: Vec<Rc<Stmt>>,
+    pub closure: Environment,
 }
 
 impl Rt {
@@ -48,8 +57,8 @@ impl fmt::Display for Rt {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SymbolTable {
+#[derive(Debug, Default, Clone)]
+struct SymbolTable {
     env: FxHashMap<Ident, Rt>,
     enclosing: Option<Box<SymbolTable>>,
 }
@@ -89,7 +98,12 @@ impl Environment {
     pub fn exit_scope(&mut self) -> Result<(), LoxError> {
         tracing::info!("exit an nested block");
         assert!(self.table.enclosing.is_some());
-        self.table = *self.table.enclosing.take().unwrap();
+        let Some(table) = self.table.enclosing.take() else {
+            return Err(LoxError::Other(anyhow!(
+                "compiler error: intent to exit global scope"
+            )));
+        };
+        self.table = *table;
         Ok(())
     }
 }
@@ -130,13 +144,17 @@ impl SymbolTable {
 pub struct Interpreter<'s, W: io::Write> {
     writer: &'s mut W,
     env: Environment,
+    functions: FxHashMap<Ident, Function>,
     // TODO: hold current cursor (span)
 }
 
 impl<'s, W: io::Write> Interpreter<'s, W> {
     pub fn new(writer: &'s mut W) -> Self {
-        let env = Environment::new();
-        Interpreter { writer, env }
+        Interpreter {
+            writer,
+            env: Environment::default(),
+            functions: FxHashMap::default(),
+        }
     }
 
     fn error(&self, message: String, span: Span) -> LoxError {
@@ -173,8 +191,13 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 self.env.define(name.clone(), evaluated)
             }
             StmtKind::DefFun(fun) => {
-                self.env
-                    .define(fun.name.clone(), Rt::Fn(Rc::new(fun.clone())));
+                let fun = Function {
+                    name: fun.name.clone(),
+                    parameters: fun.params.clone(),
+                    body: fun.body.clone(),
+                    closure: self.env.clone(),
+                };
+                self.functions.insert(fun.name.clone(), fun);
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
@@ -378,12 +401,12 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
 
 impl<'s, W: io::Write> Call<'s, W> for FnCall {
     fn call(&self, interpreter: &mut Interpreter<'s, W>) -> Result<Rt, LoxError> {
-        let Some(Rt::Fn(func)) = interpreter.env.lookup(&self.callee) else {
+        let Some(def) = interpreter.functions.get(&self.callee) else {
             let message = format!("undefined function `{}`", self.callee);
             return Err(interpreter.error(message, Span::new(0, 0)));
         };
 
-        let param_len = func.params.len();
+        let param_len = def.parameters.len();
         let arg_len = self.arguments.len();
         if param_len != arg_len {
             let message = format!("arity mismatch: expect {param_len}, given {arg_len}");
@@ -391,8 +414,8 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
         }
 
         // todo avoid clone
-        let params = func.params.clone();
-        let body = func.body.clone();
+        let params = def.parameters.clone();
+        let body = def.body.clone();
 
         interpreter.env.nest_scope()?;
         for i in 0..param_len {
