@@ -4,17 +4,14 @@ use std::{fmt, io};
 use anyhow::anyhow;
 use rustc_hash::FxHashMap;
 
-use crate::ast::{BinOp, Expr, ExprKind, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp};
 use crate::error::LoxError;
 use crate::parser;
 use crate::span::Span;
 
 /// trait for callable objects
 trait Call<'s, W: io::Write> {
-    fn call(
-        &self,
-        interpreter: &mut Interpreter<'s, W>, /* args: &[Rt] */
-    ) -> Result<Rt, LoxError>;
+    fn call(&self, interpreter: &mut Interpreter<'s, W>, args: &[Rt]) -> Result<Rt, LoxError>;
 }
 
 #[derive(Debug, Default, Clone)]
@@ -31,6 +28,7 @@ pub enum Rt {
     Void,
 }
 
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: Ident,
     pub parameters: Vec<Ident>,
@@ -392,7 +390,25 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
 
                 Ok(value.clone())
             }
-            Term::FnCall(fncall) => fncall.call(self),
+            Term::FnCall(call) => {
+                let Some(Rt::Fn(ident)) = self.env.lookup(&call.callee) else {
+                    let message = format!("undefined ident `{}`", call.callee);
+                    return Err(self.error(message, Span::new(0, 0)));
+                };
+                let Some(function) = self.functions.get(ident) else {
+                    let message = format!("undefined function `{}`", call.callee);
+                    return Err(self.error(message, Span::new(0, 0)));
+                };
+
+                let function = function.clone();
+                let mut arguments = Vec::new();
+                for i in 0..call.arguments.len() {
+                    let arg = self.expr(&call.arguments[i])?;
+                    arguments.push(arg);
+                }
+
+                function.call(self, &arguments)
+            }
         }
     }
 
@@ -409,38 +425,26 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
     }
 }
 
-impl<'s, W: io::Write> Call<'s, W> for FnCall {
-    fn call(&self, interpreter: &mut Interpreter<'s, W>) -> Result<Rt, LoxError> {
-        let Some(Rt::Fn(ident)) = interpreter.env.lookup(&self.callee) else {
-            let message = format!("undefined ident `{}`", self.callee);
-            return Err(interpreter.error(message, Span::new(0, 0)));
-        };
-        let ident = ident.clone();
-        let Some(def) = interpreter.functions.get(&ident) else {
-            let message = format!("undefined function `{}`", self.callee);
-            return Err(interpreter.error(message, Span::new(0, 0)));
-        };
-
-        let param_len = def.parameters.len();
-        let arg_len = self.arguments.len();
-        if param_len != arg_len {
-            let message = format!("arity mismatch: expect {param_len}, given {arg_len}");
+impl<'s, W: io::Write> Call<'s, W> for Function {
+    fn call(&self, interpreter: &mut Interpreter<'s, W>, args: &[Rt]) -> Result<Rt, LoxError> {
+        if self.parameters.len() != args.len() {
+            let message = format!(
+                "arity mismatch: expect {}, given {}",
+                self.parameters.len(),
+                args.len()
+            );
             return Err(interpreter.error(message, Span::new(0, 0)));
         }
 
-        interpreter.current_fn = Some(ident.clone());
+        interpreter.current_fn = Some(self.name.clone());
 
-        // todo avoid clone
-        let params = def.parameters.clone();
-        let body = def.body.clone();
-
-        let mut env = def.closure.clone();
+        let mut env = self.closure.clone();
 
         interpreter.env.nest_scope()?;
-        for i in 0..param_len {
-            let expr = interpreter.expr(&self.arguments[i])?;
-            tracing::info!("argument[{i}] = {expr}");
-            interpreter.env.define(params[i].clone(), expr);
+        for (i, arg) in args.iter().enumerate() {
+            interpreter
+                .env
+                .define(self.parameters[i].clone(), arg.clone());
         }
 
         // preserve environments
@@ -454,16 +458,15 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
         }
         interpreter.env = env;
 
-        for stmt in &body {
+        let mut ret = Rt::Void;
+        for stmt in &self.body {
             if let Err(LoxError::_Return(rt)) = interpreter.stmt(Rc::clone(stmt)) {
-                tracing::info!("return {} with {rt}", self.callee);
-                interpreter.env = preserved_env;
-                interpreter.env.exit_scope()?;
-                interpreter.current_fn = None;
-                return Ok(rt);
+                tracing::info!("return {} with {rt}", self.name);
+                ret = rt;
+                break;
             }
         }
-        let Some(def) = interpreter.functions.get_mut(&ident.clone()) else {
+        let Some(def) = interpreter.functions.get_mut(&self.name.clone()) else {
             panic!("could not update closure state");
         };
         def.closure = interpreter.env.clone();
@@ -471,7 +474,7 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
         interpreter.env.exit_scope()?;
         interpreter.current_fn = None;
 
-        Ok(Rt::Literal(Literal::Nil))
+        Ok(ret)
     }
 }
 
