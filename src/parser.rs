@@ -332,6 +332,37 @@ impl<'a> Parse<'a> for Expr {
     }
 }
 
+impl<'a> Parse<'a> for Fn {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
+        parser.eat(TokenKind::Fun)?;
+        let name = parser.parse()?;
+        // parse parameters
+        parser.eat(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        while parser.eat(TokenKind::RParen).is_err() {
+            let param = parser.parse()?;
+            params.push(param);
+
+            if parser.eat(TokenKind::Comma).is_ok() {}
+        }
+
+        // parse body
+        let body = match parser.parse()? {
+            Stmt {
+                kind: StmtKind::Block(block),
+                ..
+            } => block,
+            stmt => {
+                let message = format!("function body must be a block: `{stmt}`");
+                let span = stmt.span;
+                return Err(LoxError::SyntaxError { message, span });
+            }
+        };
+
+        Ok(Fn { name, params, body })
+    }
+}
+
 impl<'a> Parse<'a> for Stmt {
     #[tracing::instrument(name = "Parse<Stmt>", skip(parser))]
     fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
@@ -357,33 +388,9 @@ impl<'a> Parse<'a> for Stmt {
                 StmtKind::DeclVar { name, initializer }
             }
             TokenKind::Fun => {
-                parser.eat(TokenKind::Fun)?;
-                let name = parser.parse()?;
-                // parse parameters
-                parser.eat(TokenKind::LParen)?;
-                let mut params = Vec::new();
-                while parser.eat(TokenKind::RParen).is_err() {
-                    let param = parser.parse()?;
-                    params.push(param);
-
-                    if parser.eat(TokenKind::Comma).is_ok() {}
-                }
-
-                // parse body
-                let body = match parser.parse()? {
-                    Stmt {
-                        kind: StmtKind::Block(block),
-                        ..
-                    } => block,
-                    stmt => {
-                        let message = format!("function body must be a block: `{stmt}`");
-                        let span = stmt.span;
-                        return Err(LoxError::SyntaxError { message, span });
-                    }
-                };
-
+                let fun = parser.parse()?;
                 let stmt = Stmt {
-                    kind: StmtKind::DefFun(Fn { name, params, body }),
+                    kind: StmtKind::DefFun(fun),
                     span: span.to(parser.current_span()),
                 };
 
