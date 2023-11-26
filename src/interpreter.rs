@@ -272,6 +272,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 // HACK: use Result::Err to exit and return value
                 return Err(LoxError::_Return(rt));
             }
+            _ => todo!(),
         }
 
         Ok(())

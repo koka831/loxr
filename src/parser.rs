@@ -1,7 +1,9 @@
 use std::iter::Peekable;
 use std::rc::Rc;
 
-use crate::ast::{BinOp, Expr, ExprKind, Fn, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp};
+use crate::ast::{
+    BinOp, Class, Expr, ExprKind, Fn, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp,
+};
 use crate::error::{LexError, LoxError};
 use crate::lexer::Lexer;
 use crate::span::Span;
@@ -332,9 +334,24 @@ impl<'a> Parse<'a> for Expr {
     }
 }
 
+impl<'a> Parse<'a> for Class {
+    fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
+        parser.eat(TokenKind::Class)?;
+        let name = parser.parse()?;
+        parser.eat(TokenKind::LBrace)?;
+        let mut methods = Vec::new();
+        while parser.eat(TokenKind::RBrace).is_err() {
+            let method = parser.parse()?;
+            methods.push(method);
+        }
+
+        Ok(Class { name, methods })
+    }
+}
+
+// parse function declaration without `fun` prefix keyword
 impl<'a> Parse<'a> for Fn {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
-        parser.eat(TokenKind::Fun)?;
         let name = parser.parse()?;
         // parse parameters
         parser.eat(TokenKind::LParen)?;
@@ -387,7 +404,18 @@ impl<'a> Parse<'a> for Stmt {
 
                 StmtKind::DeclVar { name, initializer }
             }
+            TokenKind::Class => {
+                let class = parser.parse()?;
+                let stmt = Stmt {
+                    kind: StmtKind::DeclClass(class),
+                    span: span.to(parser.current_span()),
+                };
+
+                tracing::info!("parsed statement `{stmt}`");
+                return Ok(stmt);
+            }
             TokenKind::Fun => {
+                parser.eat(TokenKind::Fun)?;
                 let fun = parser.parse()?;
                 let stmt = Stmt {
                     kind: StmtKind::DefFun(fun),
@@ -539,6 +567,8 @@ impl<'a> Parse<'a> for Stmt {
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::Class;
+
     use super::*;
     use std::assert_matches::assert_matches;
     use std::fmt;
@@ -1110,6 +1140,54 @@ mod tests {
                     },
                 )
             )
+        );
+    }
+
+    #[test]
+    fn parse_class_decl() {
+        assert_parse(
+            r#"
+class Breakfast {
+  cook() {
+    print "Eggs a-fryin'!";
+  }
+
+  serve(who) {
+    print "Enjoy your breakfast";
+  }
+}
+            "#,
+            Class {
+                name: Ident("Breakfast".to_string()),
+                methods: vec![
+                    Fn {
+                        name: Ident("cook".to_string()),
+                        params: vec![],
+                        body: vec![Rc::new(Stmt {
+                            kind: StmtKind::Print(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::String(
+                                    "Eggs a-fryin'!".to_string(),
+                                ))),
+                                span: Span::new(40, 56),
+                            }),
+                            span: Span::new(34, 57),
+                        })],
+                    },
+                    Fn {
+                        name: Ident("serve".to_string()),
+                        params: vec![Ident("who".to_string())],
+                        body: vec![Rc::new(Stmt {
+                            kind: StmtKind::Print(Expr {
+                                kind: ExprKind::Term(Term::Literal(Literal::String(
+                                    "Enjoy your breakfast".to_string(),
+                                ))),
+                                span: Span::new(88, 110),
+                            }),
+                            span: Span::new(82, 111),
+                        })],
+                    },
+                ],
+            },
         );
     }
 }

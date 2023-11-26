@@ -23,6 +23,7 @@
 //!
 //! statement   -> expression ";" ;
 //!             | "print" expression ";" ;
+//!             | "class" ident "{" method* "}"
 //!             | "fun" ident "(" ( ident ( "," ident )* )? ")" block stmt ;
 //!             | "var" ident "=" expression ";" ;
 //!             | "{" statement* "}" ;
@@ -30,6 +31,8 @@
 //!             | "while" "(" expression ")" statement ;
 //!             | "for" "(" (DeclVar | expr stmt | ";") expression? ";" expression? ")" statement ;
 //!             | "return" expression? ";" ;
+//!
+//! method      -> ident "( ident ("," ident )* ")" block ;
 use std::fmt;
 use std::rc::Rc;
 
@@ -142,6 +145,12 @@ impl Expr {
 pub struct Ident(pub String);
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct Class {
+    pub name: Ident,
+    pub methods: Vec<Fn>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct Fn {
     pub name: Ident,
     pub params: Vec<Ident>,
@@ -155,6 +164,8 @@ pub enum StmtKind {
     Expr(Expr),
     /// print expression ;
     Print(Expr),
+    /// class declaration
+    DeclClass(Class),
     /// function declaration
     /// fun ident ( params ) { stmt }
     DefFun(Fn),
@@ -302,6 +313,7 @@ impl fmt::Display for Stmt {
         match &self.kind {
             StmtKind::Expr(expr) => expr.fmt(f),
             StmtKind::Print(expr) => write!(f, "print {expr}"),
+            StmtKind::DeclClass(class) => write!(f, "class {}", class.name),
             StmtKind::DefFun(fun) => fun.fmt(f),
             StmtKind::DeclVar { name, initializer } => write!(f, "var {name} = {initializer}"),
             StmtKind::Block(block) => write!(f, "{{ {} lines }}", block.len()),
