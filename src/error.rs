@@ -20,7 +20,7 @@ pub enum LoxError {
     #[error("could not read file: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error(transparent)]
+    #[error("internal compiler error: {0}")]
     Other(anyhow::Error),
 
     #[error("internal use")]

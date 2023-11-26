@@ -46,6 +46,11 @@ impl Report for LoxError {
                 ));
                 miette::Report::new(diag).with_source_code(source.to_string())
             }
+            LoxError::SyntaxError { message, span } => {
+                let mut diag = MietteDiagnostic::new(message);
+                diag = diag.with_label(LabeledSpan::new_with_span(Some(self.to_string()), *span));
+                miette::Report::new(diag).with_source_code(source.to_string())
+            }
             _ => {
                 let diag = MietteDiagnostic::new(self.to_string());
                 miette::Report::new(diag).with_source_code(source.to_string())

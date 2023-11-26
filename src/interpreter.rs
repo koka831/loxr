@@ -97,11 +97,8 @@ impl Environment {
 
     pub fn exit_scope(&mut self) -> Result<(), LoxError> {
         tracing::info!("exit an nested block");
-        assert!(self.table.enclosing.is_some());
         let Some(table) = self.table.enclosing.take() else {
-            return Err(LoxError::Other(anyhow!(
-                "compiler error: intent to exit global scope"
-            )));
+            return Err(LoxError::Other(anyhow!("intent to exit global scope")));
         };
         self.table = *table;
         Ok(())
@@ -436,6 +433,12 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
         // preserve environments
         let preserved_env = interpreter.env.clone();
         env.table.env.extend(preserved_env.table.env.clone());
+        if let Some(ref enc) = preserved_env.table.enclosing {
+            match env.table.enclosing {
+                Some(box ref mut e) => e.env.extend(enc.env.clone()),
+                None => env.table.enclosing = Some(enc.clone()),
+            }
+        }
         interpreter.env = env;
 
         for stmt in &body {
@@ -447,7 +450,7 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
             }
         }
         let Some(def) = interpreter.functions.get_mut(&ident.clone()) else {
-            panic!("internal compiler error: could not update closure state");
+            panic!("could not update closure state");
         };
         def.closure = interpreter.env.clone();
         interpreter.env = preserved_env;
@@ -600,7 +603,7 @@ for (var i = 0; i < 10; i = i + 1) {
         );
         assert_interpret_err!(
             r#"a();"#,
-            LoxError::SyntaxError { message, .. } if message == "undefined function `a`"
+            LoxError::SyntaxError { message, .. } if message == "undefined ident `a`"
         );
         assert_interpret_err!(
             "fun foo(a, b) { print a + b; } foo(1, 2, 3);",
