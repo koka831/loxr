@@ -141,6 +141,7 @@ impl SymbolTable {
 pub struct Interpreter<'s, W: io::Write> {
     writer: &'s mut W,
     env: Environment,
+    // classes: FxHashMap<Ident, Class>,
     functions: FxHashMap<Ident, Function>,
     current_fn: Option<Ident>,
     // TODO: hold current cursor (span)
@@ -185,11 +186,11 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 tracing::debug!("print {literal}");
                 writeln!(self.writer, "{literal}").unwrap();
             }
-            StmtKind::DeclVar { name, initializer } => {
+            StmtKind::VarDecl { name, initializer } => {
                 let evaluated = self.expr(initializer)?;
                 self.env.define(name.clone(), evaluated)
             }
-            StmtKind::DefFun(fun) => {
+            StmtKind::FunDecl(fun) => {
                 let name = fun.name.clone();
                 let fun = Function {
                     name: name.clone(),

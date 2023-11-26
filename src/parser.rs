@@ -2,7 +2,7 @@ use std::iter::Peekable;
 use std::rc::Rc;
 
 use crate::ast::{
-    BinOp, Class, Expr, ExprKind, Fn, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp,
+    BinOp, ClassDecl, Expr, ExprKind, FunDecl, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp,
 };
 use crate::error::{LexError, LoxError};
 use crate::lexer::Lexer;
@@ -334,7 +334,7 @@ impl<'a> Parse<'a> for Expr {
     }
 }
 
-impl<'a> Parse<'a> for Class {
+impl<'a> Parse<'a> for ClassDecl {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         parser.eat(TokenKind::Class)?;
         let name = parser.parse()?;
@@ -345,12 +345,12 @@ impl<'a> Parse<'a> for Class {
             methods.push(method);
         }
 
-        Ok(Class { name, methods })
+        Ok(ClassDecl { name, methods })
     }
 }
 
 // parse function declaration without `fun` prefix keyword
-impl<'a> Parse<'a> for Fn {
+impl<'a> Parse<'a> for FunDecl {
     fn parse(parser: &mut Parser<'a>) -> ParseResult<Self> {
         let name = parser.parse()?;
         // parse parameters
@@ -376,7 +376,7 @@ impl<'a> Parse<'a> for Fn {
             }
         };
 
-        Ok(Fn { name, params, body })
+        Ok(FunDecl { name, params, body })
     }
 }
 
@@ -402,12 +402,12 @@ impl<'a> Parse<'a> for Stmt {
                     Rc::new(Expr::nil())
                 };
 
-                StmtKind::DeclVar { name, initializer }
+                StmtKind::VarDecl { name, initializer }
             }
             TokenKind::Class => {
                 let class = parser.parse()?;
                 let stmt = Stmt {
-                    kind: StmtKind::DeclClass(class),
+                    kind: StmtKind::ClassDecl(class),
                     span: span.to(parser.current_span()),
                 };
 
@@ -418,7 +418,7 @@ impl<'a> Parse<'a> for Stmt {
                 parser.eat(TokenKind::Fun)?;
                 let fun = parser.parse()?;
                 let stmt = Stmt {
-                    kind: StmtKind::DefFun(fun),
+                    kind: StmtKind::FunDecl(fun),
                     span: span.to(parser.current_span()),
                 };
 
@@ -490,7 +490,7 @@ impl<'a> Parse<'a> for Stmt {
 
                 let init = match parser.parse()? {
                     stmt @ Stmt {
-                        kind: StmtKind::DeclVar { .. } | StmtKind::Expr(..),
+                        kind: StmtKind::VarDecl { .. } | StmtKind::Expr(..),
                         ..
                     } => Rc::new(stmt),
                     stmt => {
@@ -567,7 +567,7 @@ impl<'a> Parse<'a> for Stmt {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::Class;
+    use crate::ast::ClassDecl;
 
     use super::*;
     use std::assert_matches::assert_matches;
@@ -912,14 +912,14 @@ mod tests {
         assert_parse!(
             "var x1_0;",
             Stmt {
-                kind: StmtKind::DeclVar { name: Ident(name), initializer },
+                kind: StmtKind::VarDecl { name: Ident(name), initializer },
                 ..
             } if &name == "x1_0" && *initializer == Expr::nil()
         );
         assert_parse!(
             "var x = 10;",
             Stmt {
-                kind: StmtKind::DeclVar { name: Ident(..), initializer },
+                kind: StmtKind::VarDecl { name: Ident(..), initializer },
                 ..
             } if *initializer => Expr {
                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -951,7 +951,7 @@ mod tests {
             "{ var x = 10; }",
             Stmt {
                 kind: StmtKind::Block(vec![Stmt {
-                    kind: StmtKind::DeclVar {
+                    kind: StmtKind::VarDecl {
                         name: Ident("x".into()),
                         initializer: Expr {
                             kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -970,7 +970,7 @@ mod tests {
             Stmt {
                 kind: StmtKind::Block(vec![
                     Stmt {
-                        kind: StmtKind::DeclVar {
+                        kind: StmtKind::VarDecl {
                             name: Ident("x".into()),
                             initializer: Expr {
                                 kind: ExprKind::Term(Term::Literal(Literal::Integer(10))),
@@ -1099,14 +1099,14 @@ mod tests {
         assert_parse!(
             "fun x(){}",
             Stmt {
-                kind: StmtKind::DefFun(Fn { name, params, .. }),
+                kind: StmtKind::FunDecl(FunDecl { name, params, .. }),
                 ..
             } if name == Ident("x".into()) && params.is_empty()
         );
         assert_parse!(
             "fun add(a, b) { print a + b; }",
             Stmt {
-                kind: StmtKind::DefFun(Fn { name, params, .. }),
+                kind: StmtKind::FunDecl(FunDecl { name, params, .. }),
                 ..
             } if name == Ident("add".into()) && params == vec![Ident("a".into()), Ident("b".into())]
         );
@@ -1157,10 +1157,10 @@ class Breakfast {
   }
 }
             "#,
-            Class {
+            ClassDecl {
                 name: Ident("Breakfast".to_string()),
                 methods: vec![
-                    Fn {
+                    FunDecl {
                         name: Ident("cook".to_string()),
                         params: vec![],
                         body: vec![Rc::new(Stmt {
@@ -1173,7 +1173,7 @@ class Breakfast {
                             span: Span::new(34, 57),
                         })],
                     },
-                    Fn {
+                    FunDecl {
                         name: Ident("serve".to_string()),
                         params: vec![Ident("who".to_string())],
                         body: vec![Rc::new(Stmt {
