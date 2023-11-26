@@ -142,6 +142,7 @@ pub struct Interpreter<'s, W: io::Write> {
     writer: &'s mut W,
     env: Environment,
     functions: FxHashMap<Ident, Function>,
+    current_fn: Option<Ident>,
     // TODO: hold current cursor (span)
 }
 
@@ -151,6 +152,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
             writer,
             env: Environment::default(),
             functions: FxHashMap::default(),
+            current_fn: None,
         }
     }
 
@@ -256,6 +258,13 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 self.env.exit_scope()?;
             }
             StmtKind::Return(expr) => {
+                if self.current_fn.is_none() {
+                    return Err(LoxError::SyntaxError {
+                        message: "`return` statement in global scope found".to_string(),
+                        span: Span::new(0, 0),
+                    });
+                }
+
                 let rt = match expr {
                     Some(expr) => self.expr(expr)?,
                     None => Rt::Void,
@@ -417,6 +426,8 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
             return Err(interpreter.error(message, Span::new(0, 0)));
         }
 
+        interpreter.current_fn = Some(ident.clone());
+
         // todo avoid clone
         let params = def.parameters.clone();
         let body = def.body.clone();
@@ -446,6 +457,7 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
                 tracing::info!("return {} with {rt}", self.callee);
                 interpreter.env = preserved_env;
                 interpreter.env.exit_scope()?;
+                interpreter.current_fn = None;
                 return Ok(rt);
             }
         }
@@ -455,6 +467,7 @@ impl<'s, W: io::Write> Call<'s, W> for FnCall {
         def.closure = interpreter.env.clone();
         interpreter.env = preserved_env;
         interpreter.env.exit_scope()?;
+        interpreter.current_fn = None;
 
         Ok(Rt::Literal(Literal::Nil))
     }
@@ -578,6 +591,14 @@ mod tests {
         assert_interpret!(
             "for (var i = 0; i < 5; i = i + 1) { print i; }",
             "0\n1\n2\n3\n4",
+        );
+    }
+
+    #[test]
+    fn return_stmt_in_global_scope() {
+        assert_interpret_err!(
+            "return;",
+            LoxError::SyntaxError { message, .. } if message == "`return` statement in global scope found"
         );
     }
 
