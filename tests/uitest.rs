@@ -14,6 +14,7 @@ fn compile<P: AsRef<Path>>(program: &P) -> Output {
     let program = program.as_ref().display().to_string();
     match Command::new("cargo")
         .env("CLICOLOR", "0")
+        .env("RUST_LOG", "warn")
         .args(["run", "--quiet", "--", &program])
         .output()
     {
@@ -39,6 +40,16 @@ fn ui_compile_ok() {
         let output = compile(&entry);
         print_output(output.clone());
         assert!(output.status.success(), "test failed {}", entry.display());
+
+        let stdout = entry.with_extension("stdout");
+        if let Ok(expected) = std::fs::read_to_string(stdout) {
+            similar_asserts::assert_eq!(
+                buf_to_string(output.stdout),
+                expected,
+                "{}",
+                entry.display()
+            );
+        }
     }
 }
 
@@ -68,7 +79,6 @@ fn ui_compile_err() {
     testcases.push("tests/ui/error");
 
     for entry in collect_path(testcases) {
-        dbg!(&entry);
         let output = compile(&entry);
         print_output(output.clone());
         assert!(
@@ -78,7 +88,6 @@ fn ui_compile_err() {
         );
 
         let stderr = entry.with_extension("stderr");
-        dbg!(&stderr);
         let expected = std::fs::read_to_string(stderr).expect("could not read .stderr file");
         similar_asserts::assert_eq!(
             buf_to_string(output.stderr),
