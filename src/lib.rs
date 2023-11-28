@@ -53,6 +53,7 @@ pub fn exec_file<P: AsRef<Path>>(path: P) -> Result<(), LoxError> {
     if let Err(e) = Interpreter::new(&mut out).execute(&content) {
         let mut stderr = BufWriter::new(io::stderr().lock());
         DiagnosticReporter::new(&mut stderr).report(&e, &content);
+        return Err(e);
     }
 
     Ok(())

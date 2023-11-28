@@ -14,7 +14,7 @@ pub enum LoxError {
     #[error("unexpected token: expect {expect}, found `{actual}`")]
     UnexpectedToken { expect: String, actual: Token },
 
-    #[error("syntax error at {span:?}: {message}")]
+    #[error("syntax error: {message}")]
     SyntaxError { message: String, span: Span },
 
     #[error("could not read file: {0}")]

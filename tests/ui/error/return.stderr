@@ -1,0 +1,6 @@
+  x `return` statement in global scope found
+   ,----
+ 1 | return;
+   : ^
+   : `-- syntax error: `return` statement in global scope found
+   `----

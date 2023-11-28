@@ -21,7 +21,7 @@ fn main() {
     };
 
     if let Err(e) = res {
-        tracing::error!("loxr did not finish normally: {e}");
+        tracing::info!("loxr did not finish normally: {e}");
         std::process::exit(1);
     }
 }
