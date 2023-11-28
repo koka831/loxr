@@ -2,7 +2,7 @@ use std::iter::Peekable;
 use std::rc::Rc;
 
 use crate::ast::{
-    BinOp, ClassDecl, Expr, ExprKind, FunDecl, FnCall, Ident, Literal, Stmt, StmtKind, Term, UnOp,
+    BinOp, ClassDecl, Expr, ExprKind, FnCall, FunDecl, Ident, Literal, Stmt, StmtKind, Term, UnOp,
 };
 use crate::error::{LexError, LoxError};
 use crate::lexer::Lexer;
@@ -327,6 +327,14 @@ impl<'a> Parse<'a> for Expr {
                     Ok(expr)
                 }
             }
+        } else if parser.eat(TokenKind::Dot).is_ok() {
+            let field = parser.parse()?;
+            let expr = Expr {
+                kind: ExprKind::Get(Box::new(expr), field),
+                span: span.to(parser.current_span()),
+            };
+
+            Ok(expr)
         } else {
             tracing::info!("parsed expr `{expr}`");
             Ok(expr)
@@ -678,6 +686,40 @@ mod tests {
                 kind: ExprKind::Term(Term::FnCall { .. }),
                 ..
             }
+        );
+    }
+
+    #[test]
+    fn parse_getter_expr() {
+        assert_parse(
+            "x.y",
+            Expr {
+                kind: ExprKind::Get(
+                    Box::new(Expr {
+                        kind: ExprKind::Term(Term::Ident(Ident("x".into()))),
+                        span: Span { base: 0, len: 1 },
+                    }),
+                    Ident("y".into()),
+                ),
+                span: Span { base: 0, len: 3 },
+            },
+        );
+
+        assert_parse(
+            "foo().bar",
+            Expr {
+                kind: ExprKind::Get(
+                    Box::new(Expr {
+                        kind: ExprKind::Term(Term::FnCall(FnCall {
+                            callee: Ident("foo".into()),
+                            arguments: vec![],
+                        })),
+                        span: Span { base: 0, len: 5 },
+                    }),
+                    Ident("bar".into()),
+                ),
+                span: Span { base: 0, len: 9 },
+            },
         );
     }
 

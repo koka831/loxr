@@ -9,7 +9,7 @@
 //! expr        -> unary | binary | term | assignment ;
 //! term        -> grouped | ident | literal | call ;
 //! unary       -> ( "-" | "!" ) expr ;
-//! call        -> term "(" ( expr ( "," expr )* )? ")" ;
+//! call        -> term ( "(" ( expr ( "," expr )* )? ")" | "." ident )* ;
 //! binary      -> expr (
 //!                  "!=" | "==" | ">" | ">=" | "<" | "<=" | "-" | "+" | "/" | "*" | "and" | "or"
 //!                ) expr ;
@@ -122,6 +122,8 @@ pub enum ExprKind {
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Unary(UnOp, Box<Expr>),
     Term(Term),
+    // (expr result).`ident`
+    Get(Box<Expr>, Ident),
     // assign a value to a defined variable.
     Assign { name: Ident, expr: Box<Expr> },
 }
@@ -301,6 +303,7 @@ impl fmt::Display for Expr {
                 write!(f, "{lhs} {op} {rhs}")
             }
             ExprKind::Term(term) => term.fmt(f),
+            ExprKind::Get(box expr, field) => write!(f, "{expr}.{field}"),
             ExprKind::Assign { name, box expr } => {
                 write!(f, "{name} = {expr}")
             }

@@ -11,6 +11,7 @@ use crate::span::Span;
 
 /// trait for callable objects
 trait Call<'s, W: io::Write> {
+    fn arity(&self) -> usize;
     fn call(&self, interpreter: &mut Interpreter<'s, W>, args: &[Rt]) -> Result<Rt, LoxError>;
 }
 
@@ -23,9 +24,23 @@ pub struct Environment {
 /// represents runtime value
 pub enum Rt {
     Literal(Literal),
+    Class(Ident),
+    Instance(Instance),
     // function ptr
     Fn(Ident),
     Void,
+}
+
+#[derive(Debug, Clone)]
+pub struct Class {
+    pub name: Ident,
+    // Map<Function.name, Function>
+    pub methods: FxHashMap<Ident, Function>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instance {
+    pub class_name: Ident,
 }
 
 #[derive(Debug, Clone)]
@@ -40,8 +55,7 @@ impl Rt {
     pub fn truthy(&self) -> bool {
         match self {
             Rt::Literal(l) => l.truthy(),
-            Rt::Fn(..) => false,
-            Rt::Void => false,
+            _ => false,
         }
     }
 }
@@ -49,6 +63,8 @@ impl fmt::Display for Rt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Rt::Literal(l) => l.fmt(f),
+            Rt::Class(class) => class.fmt(f),
+            Rt::Instance(instance) => instance.class_name.fmt(f),
             Rt::Fn(fun) => fun.fmt(f),
             Rt::Void => write!(f, "void"),
         }
@@ -139,7 +155,7 @@ impl SymbolTable {
 pub struct Interpreter<'s, W: io::Write> {
     writer: &'s mut W,
     env: Environment,
-    // classes: FxHashMap<Ident, Class>,
+    classes: FxHashMap<Ident, Class>,
     functions: FxHashMap<Ident, Function>,
     current_fn: Option<Ident>,
     // TODO: hold current cursor (span)
@@ -150,6 +166,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
         Interpreter {
             writer,
             env: Environment::default(),
+            classes: FxHashMap::default(),
             functions: FxHashMap::default(),
             current_fn: None,
         }
@@ -172,6 +189,14 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
         self.writer.flush().unwrap();
 
         Ok(())
+    }
+
+    fn create_instance(&mut self, class_name: Ident) -> Rt {
+        let name = class_name.clone();
+        let instance = Rt::Instance(Instance { class_name });
+        self.env.define(name, instance.clone());
+
+        instance
     }
 
     fn stmt(&mut self, stmt: Rc<Stmt>) -> Result<(), LoxError> {
@@ -198,6 +223,25 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 };
                 self.functions.insert(fun.name.clone(), fun);
                 self.env.define(name.clone(), Rt::Fn(name.clone()));
+            }
+            StmtKind::ClassDecl(class) => {
+                let name = class.name.clone();
+                let class = Class {
+                    name: name.clone(),
+                    methods: FxHashMap::from_iter(class.methods.iter().map(|m| {
+                        (
+                            m.name.clone(),
+                            Function {
+                                name: m.name.clone(),
+                                parameters: m.params.clone(),
+                                body: m.body.clone(),
+                                closure: self.env.clone(),
+                            },
+                        )
+                    })),
+                };
+                self.classes.insert(name.clone(), class);
+                self.env.define(name.clone(), Rt::Class(name));
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
@@ -271,7 +315,6 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 // HACK: use Result::Err to exit and return value
                 return Err(LoxError::_Return(rt));
             }
-            _ => todo!(),
         }
 
         Ok(())
@@ -374,6 +417,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 self.env.assign(name.clone(), evaluated.clone())?;
                 Ok(evaluated)
             }
+            _ => todo!(),
         }
     }
 
@@ -425,9 +469,31 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
     }
 }
 
-impl<'s, W: io::Write> Call<'s, W> for Function {
+impl<'s, W: io::Write> Call<'s, W> for Class {
+    fn arity(&self) -> usize {
+        match self.methods.get(&Ident("init".into())) {
+            Some(init) => init.parameters.len(),
+            None => 0,
+        }
+    }
+
     fn call(&self, interpreter: &mut Interpreter<'s, W>, args: &[Rt]) -> Result<Rt, LoxError> {
-        if self.parameters.len() != args.len() {
+        let instance = interpreter.create_instance(self.name.clone());
+        if let Some(init) = self.methods.get(&Ident("init".into())) {
+            init.call(interpreter, args)?;
+        }
+
+        Ok(instance)
+    }
+}
+
+impl<'s, W: io::Write> Call<'s, W> for Function {
+    fn arity(&self) -> usize {
+        self.parameters.len()
+    }
+
+    fn call(&self, interpreter: &mut Interpreter<'s, W>, args: &[Rt]) -> Result<Rt, LoxError> {
+        if (self as &dyn Call<'_, W>).arity() != args.len() {
             let message = format!(
                 "arity mismatch: expect {}, given {}",
                 self.parameters.len(),
