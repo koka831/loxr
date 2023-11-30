@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::{fmt, io};
 
 use anyhow::anyhow;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::{BinOp, Expr, ExprKind, Ident, Literal, Stmt, StmtKind, Term, UnOp};
 use crate::error::LoxError;
@@ -34,6 +34,7 @@ pub enum Rt {
 #[derive(Debug, Clone)]
 pub struct Class {
     pub name: Ident,
+    pub fields: FxHashSet<Ident>,
     // Map<Function.name, Function>
     pub methods: FxHashMap<Ident, Function>,
 }
@@ -41,6 +42,7 @@ pub struct Class {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Instance {
     pub class_name: Ident,
+    pub fields: FxHashMap<Ident, Rt>,
 }
 
 #[derive(Debug, Clone)]
@@ -191,12 +193,20 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
         Ok(())
     }
 
-    fn create_instance(&mut self, class_name: Ident) -> Rt {
-        let name = class_name.clone();
-        let instance = Rt::Instance(Instance { class_name });
+    fn create_instance(&mut self, class_name: Ident) -> Result<Rt, LoxError> {
+        let Some(class) = self.classes.get(&class_name) else {
+            return Err(self.error("could not find class".into(), Span::new(0, 0)));
+        };
+        let name = class.name.clone();
+        let fields = class
+            .fields
+            .iter()
+            .map(|field| (field.clone(), Rt::Literal(Literal::Nil)))
+            .collect();
+        let instance = Rt::Instance(Instance { class_name, fields });
         self.env.define(name, instance.clone());
 
-        instance
+        Ok(instance)
     }
 
     fn stmt(&mut self, stmt: Rc<Stmt>) -> Result<(), LoxError> {
@@ -228,6 +238,7 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 let name = class.name.clone();
                 let class = Class {
                     name: name.clone(),
+                    fields: FxHashSet::default(),
                     methods: FxHashMap::from_iter(class.methods.iter().map(|m| {
                         (
                             m.name.clone(),
@@ -417,7 +428,17 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 self.env.assign(name.clone(), evaluated.clone())?;
                 Ok(evaluated)
             }
-            _ => todo!(),
+            ExprKind::Get(box expr, field) => {
+                let Rt::Instance(instance) = self.expr(expr)? else {
+                    let message = format!("`{expr}` does not have a getter `{field}`");
+                    return Err(self.error(message, expr.span));
+                };
+
+                match instance.fields.get(field) {
+                    Some(value) => Ok(value.clone()),
+                    None => Err(self.error(format!("unknown field `{field}`"), expr.span)),
+                }
+            }
         }
     }
 
@@ -478,7 +499,7 @@ impl<'s, W: io::Write> Call<'s, W> for Class {
     }
 
     fn call(&self, interpreter: &mut Interpreter<'s, W>, args: &[Rt]) -> Result<Rt, LoxError> {
-        let instance = interpreter.create_instance(self.name.clone());
+        let instance = interpreter.create_instance(self.name.clone())?;
         if let Some(init) = self.methods.get(&Ident("init".into())) {
             init.call(interpreter, args)?;
         }
