@@ -268,15 +268,33 @@ impl<'a> Parse<'a> for Expr {
             }
             _ => {
                 let term = parser.parse()?;
-                if let Term::Ident(ref ident) = term && parser.eat(TokenKind::Eq).is_ok() {
-                    let expr = Box::new(parser.parse()?);
-                    let kind = ExprKind::Assign { name: ident.clone(), expr };
+                let term_span = span.to(parser.current_span());
 
-                    let span = span.to(parser.current_span());
-                    let expr = Expr { kind, span };
-                    tracing::info!("parsed expr `{expr}`");
+                if let Term::Ident(ref ident) = term {
+                    if parser.eat(TokenKind::Eq).is_ok() {
+                        let expr = Box::new(parser.parse()?);
+                        let kind = ExprKind::Assign {
+                            name: ident.clone(),
+                            expr,
+                        };
 
-                    return Ok(expr);
+                        let span = span.to(parser.current_span());
+                        let expr = Expr { kind, span };
+                        tracing::info!("parsed expr `{expr}`");
+
+                        return Ok(expr);
+                    } else if parser.eat(TokenKind::Dot).is_ok() {
+                        let field = parser.parse()?;
+                        ExprKind::Get(
+                            Box::new(Expr {
+                                kind: ExprKind::Term(term),
+                                span: term_span,
+                            }),
+                            field,
+                        )
+                    } else {
+                        ExprKind::Term(term)
+                    }
                 } else {
                     ExprKind::Term(term)
                 }
@@ -558,8 +576,18 @@ impl<'a> Parse<'a> for Stmt {
             }
             _ => {
                 let expr = parser.parse::<Expr>()?;
+                if let ExprKind::Get(box expr, field) = expr.kind {
+                    parser.eat(TokenKind::Eq)?;
+                    let rhs = parser.parse()?;
 
-                StmtKind::Expr(expr)
+                    StmtKind::SetField {
+                        callee: Box::new(expr),
+                        field,
+                        expr: Box::new(rhs),
+                    }
+                } else {
+                    StmtKind::Expr(expr)
+                }
             }
         };
 

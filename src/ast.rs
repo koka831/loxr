@@ -177,6 +177,12 @@ pub enum StmtKind {
         name: Ident,
         initializer: Rc<Expr>,
     },
+    // callee.`ident` = expr
+    SetField {
+        callee: Box<Expr>,
+        field: Ident,
+        expr: Box<Expr>,
+    },
     Block(Vec<Rc<Stmt>>),
     /// if ( expr ) statement ( else statement )?
     If {
@@ -319,6 +325,11 @@ impl fmt::Display for Stmt {
             StmtKind::ClassDecl(class) => write!(f, "class {}", class.name),
             StmtKind::FunDecl(fun) => fun.fmt(f),
             StmtKind::VarDecl { name, initializer } => write!(f, "var {name} = {initializer}"),
+            StmtKind::SetField {
+                box callee,
+                field,
+                box expr,
+            } => write!(f, "{callee}.{field} = {expr}"),
             StmtKind::Block(block) => write!(f, "{{ {} lines }}", block.len()),
             StmtKind::If {
                 condition,

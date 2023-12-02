@@ -100,6 +100,11 @@ impl Environment {
         self.table.lookup(ident)
     }
 
+    pub fn get_mut(&mut self, ident: &Ident) -> Option<&mut Rt> {
+        tracing::debug!("look up &mut {ident}");
+        self.table.get_mut(ident)
+    }
+
     /// creates a nested/scoped environment that is used while executing a block statement.
     pub fn nest_scope(&mut self) -> Result<(), LoxError> {
         tracing::info!("create an nested block");
@@ -151,6 +156,12 @@ impl SymbolTable {
         self.env
             .get(ident)
             .or_else(|| self.enclosing.as_ref().and_then(|t| t.lookup(ident)))
+    }
+
+    pub fn get_mut(&mut self, ident: &Ident) -> Option<&mut Rt> {
+        self.env
+            .get_mut(ident)
+            .or_else(|| self.enclosing.as_deref_mut().and_then(|t| t.get_mut(ident)))
     }
 }
 
@@ -253,6 +264,25 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 };
                 self.classes.insert(name.clone(), class);
                 self.env.define(name.clone(), Rt::Class(name));
+            }
+            StmtKind::SetField {
+                box callee,
+                field,
+                box expr,
+            } => {
+                let rhv = self.expr(expr)?;
+                let Expr {
+                    kind: ExprKind::Term(Term::Ident(ident)),
+                    ..
+                } = callee
+                else {
+                    let message = format!("`{callee}` does not have a setter `{field}`");
+                    return Err(self.error(message, callee.span));
+                };
+                let Some(Rt::Instance(instance)) = self.env.get_mut(ident) else {
+                    panic!()
+                };
+                instance.fields.insert(field.clone(), rhv);
             }
             StmtKind::Block(stmts) => {
                 self.env.nest_scope()?;
@@ -434,10 +464,12 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                     return Err(self.error(message, expr.span));
                 };
 
-                match instance.fields.get(field) {
-                    Some(value) => Ok(value.clone()),
-                    None => Err(self.error(format!("unknown field `{field}`"), expr.span)),
-                }
+                let value = instance
+                    .fields
+                    .get(field)
+                    .map_or(Rt::Literal(Literal::Nil), |v| v.clone());
+
+                Ok(value)
             }
         }
     }
@@ -456,23 +488,35 @@ impl<'s, W: io::Write> Interpreter<'s, W> {
                 Ok(value.clone())
             }
             Term::FnCall(call) => {
-                let Some(Rt::Fn(ident)) = self.env.lookup(&call.callee) else {
-                    let message = format!("undefined ident `{}`", call.callee);
-                    return Err(self.error(message, Span::new(0, 0)));
-                };
-                let Some(function) = self.functions.get(ident) else {
-                    let message = format!("undefined function `{}`", call.callee);
-                    return Err(self.error(message, Span::new(0, 0)));
+                // Rt::Class or Rt::Fn => as_callable
+                let callable: Box<dyn Call<'_, W>> = match self.env.lookup(&call.callee) {
+                    Some(Rt::Fn(name)) => {
+                        let Some(fun) = self.functions.get(name) else {
+                            let message = format!("undefined function `{}`", name);
+                            return Err(self.error(message, Span::new(0, 0)));
+                        };
+                        Box::new(fun.clone())
+                    }
+                    Some(Rt::Class(name)) => {
+                        let Some(class) = self.classes.get(name) else {
+                            let message = format!("undefined class `{}`", name);
+                            return Err(self.error(message, Span::new(0, 0)));
+                        };
+                        Box::new(class.clone())
+                    }
+                    _ => {
+                        let message = format!("undefined ident `{}`", call.callee);
+                        return Err(self.error(message, Span::new(0, 0)));
+                    }
                 };
 
-                let function = function.clone();
                 let mut arguments = Vec::new();
                 for i in 0..call.arguments.len() {
                     let arg = self.expr(&call.arguments[i])?;
                     arguments.push(arg);
                 }
 
-                function.call(self, &arguments)
+                callable.call(self, &arguments)
             }
         }
     }
