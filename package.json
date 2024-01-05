@@ -1,0 +1,14 @@
+{
+  "name": "loxr",
+  "version": "0.1.0",
+  "files": [
+    "loxr_bg.wasm",
+    "loxr.js",
+    "loxr.d.ts"
+  ],
+  "module": "loxr.js",
+  "types": "loxr.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
