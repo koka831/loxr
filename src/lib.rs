@@ -8,8 +8,7 @@ use std::io::{self, BufWriter};
 use std::path::Path;
 
 use error::LoxError;
-use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use wasm_bindgen::prelude::*;
 
 use crate::diagnosis::DiagnosticReporter;
 use crate::interpreter::Interpreter;
@@ -23,27 +22,13 @@ pub mod parser;
 pub mod span;
 pub mod token;
 
-pub fn prompt() -> Result<(), LoxError> {
-    let mut rl = DefaultEditor::new().unwrap();
-    let mut out = BufWriter::new(io::stdout());
-    let mut interpreter = Interpreter::new(&mut out);
-
-    loop {
-        match rl.readline(">> ") {
-            Ok(line) => {
-                if let Err(e) = interpreter.execute(&line) {
-                    eprintln!("{e}");
-                }
-            }
-            Err(ReadlineError::Eof) => break,
-            Err(e) => {
-                eprintln!("lox: failed to read stdin\n{e}");
-                break;
-            }
-        }
+#[wasm_bindgen]
+pub fn interpret(program: &str) -> String {
+    let mut out = BufWriter::new(Vec::new());
+    match Interpreter::new(&mut out).execute(program) {
+        Ok(()) => String::from_utf8(out.into_inner().unwrap()).unwrap(),
+        Err(e) => e.to_string(),
     }
-
-    Ok(())
 }
 
 pub fn exec_file<P: AsRef<Path>>(path: P) -> Result<(), LoxError> {
