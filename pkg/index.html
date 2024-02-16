@@ -2,6 +2,7 @@
 <html lang="en">
     <head>
         <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Loxr online interpreter</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.3/ace.js" type="text/javascript"></script>
         <style type="text/css">
@@ -51,6 +52,7 @@
             }
             #output {
                 position: absolute;
+                box-sizing: border-box;
                 width: 100%;
                 height: calc(50vh - 80px);
                 top: calc(50vh + 80px);
@@ -64,11 +66,22 @@
     </head>
     <body>
     <div class="header">Crafting interpreter</div>
-    <div id="editor">fun hello() {
+    <div id="editor">// print "hello, world"
+fun hello() {
     print "hello, world";
 }
 
-hello();</div>
+hello();
+
+fun fib(n) {
+    if (n <= 1) return n;
+    return fib(n - 2) + fib(n - 1);
+}
+
+// print first 10 fibonacci numbers
+for (var i = 0; i < 10; i = i + 1) {
+    print fib(i);
+}</div>
     <div class="result">
         <div>Result</div>
         <button class="interpret" onClick="interpret();">Interpret</button>
